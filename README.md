@@ -1,9 +1,5 @@
 # OneAcreFund's OpenFaaS RabbitMQ Connector
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/OneAcreFund/rabbitmq-connector)](https://goreportcard.com/report/github.com/OneAcreFund/rabbitmq-connector)
-![CI](https://github.com/OneAcreFund/rabbitmq-connector/workflows/CI/badge.svg)
-![Docker Release](https://github.com/OneAcreFund/rabbitmq-connector/workflows/Docker%20Release/badge.svg)
-
 An enhanced version of the RabbitMQ Connector for triggering OpenFaaS functions. It maps RabbitMQ messages to functions by using the `Routing keys`.
 
 ## Usage
