@@ -51,10 +51,18 @@ func (c *Controller) Start(ctx context.Context) {
 
 // Invoke triggers a call to all functions registered to the specified topic. It will abort invocation in case it encounters an error
 func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation) error {
+	log.Printf("Starting invocation for topic %s", topic) // <-- Initial log statement
+
 	functions := c.cache.GetCachedValues(topic)
 
+	if len(functions) == 0 {
+		log.Printf("No functions registered for topic %s", topic) // <-- Log if no functions are registered for a topic
+		return nil                                                // Assuming you'd want to return without error if no functions are tied to a topic
+	}
+
 	for _, fn := range functions {
-		_, err := c.client.InvokeSync(context.Background(), fn, invocation)
+		log.Printf("Invoking function %s for topic %s", fn, topic) // <-- Log which function is being invoked
+		_, err := c.client.InvokeAsync(context.Background(), fn, invocation)
 		if err != nil {
 			log.Printf("Invocation for topic %s failed due to err %s", topic, err)
 			return err
@@ -111,6 +119,7 @@ func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, bu
 
 		for _, fn := range found {
 			topics := c.extractTopicsFromAnnotations(fn)
+			log.Printf("Function: %s, Topics: %v", fn.Name, topics)
 
 			for _, topic := range topics {
 				if len(ns) > 0 {
@@ -128,7 +137,7 @@ func (c *Controller) extractTopicsFromAnnotations(fn types.FunctionStatus) []str
 
 	if fn.Annotations != nil {
 		annotations := *fn.Annotations
-		if topicNames, exist := annotations["topic"]; exist {
+		if topicNames, exist := annotations["topics"]; exist {
 			topics = strings.Split(topicNames, ",")
 		}
 	}

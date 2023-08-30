@@ -85,6 +85,7 @@ func TestConnector_Run(t *testing.T) {
 		Topology: types.Topology{struct {
 			Name        string   "json:\"name\""
 			Topics      []string "json:\"topics\""
+			Queue       string   "json:\"queue\""
 			Declare     bool     "json:\"declare\""
 			Type        string   "json:\"type,omitempty\""
 			Durable     bool     "json:\"durable,omitempty\""
@@ -92,6 +93,7 @@ func TestConnector_Run(t *testing.T) {
 		}{
 			Name:        "Nasdaq",
 			Topics:      []string{"Transport", "Billing"},
+			Queue:       "main_queue",
 			Declare:     false,
 			Type:        "direct",
 			Durable:     false,
@@ -214,6 +216,7 @@ func TestConnector_handleConnectionError(t *testing.T) {
 		Topology: types.Topology{struct {
 			Name        string   "json:\"name\""
 			Topics      []string "json:\"topics\""
+			Queue       string   "json:\"queue\""
 			Declare     bool     "json:\"declare\""
 			Type        string   "json:\"type,omitempty\""
 			Durable     bool     "json:\"durable,omitempty\""
@@ -221,6 +224,7 @@ func TestConnector_handleConnectionError(t *testing.T) {
 		}{
 			Name:        "Nasdaq",
 			Topics:      []string{"Transport", "Billing"},
+			Queue:       "main_queue",
 			Declare:     false,
 			Type:        "direct",
 			Durable:     false,

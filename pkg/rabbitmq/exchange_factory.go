@@ -88,24 +88,22 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		log.Printf("Successfully declared exchange %s of type %s { Durable: %t Auto-Delete: %t }", ex.Name, ex.Type, ex.Durable, ex.AutoDeleted)
 	}
 
+	_, declareErr := con.QueueDeclare(
+		ex.Queue,
+		ex.Durable,
+		ex.AutoDeleted,
+		false,
+		false,
+		amqp.Table{},
+	)
+	if declareErr != nil {
+		return declareErr
+	}
+	log.Printf("Successfully declared Queue %s", ex.Queue)
+
 	for _, topic := range ex.Topics {
-		name := GenerateQueueName(ex.Name, topic)
-
-		_, declareErr := con.QueueDeclare(
-			name,
-			ex.Durable,
-			ex.AutoDeleted,
-			false,
-			false,
-			amqp.Table{},
-		)
-		if declareErr != nil {
-			return declareErr
-		}
-		log.Printf("Successfully declared Queue %s", name)
-
 		bindErr := con.QueueBind(
-			name,
+			ex.Queue,
 			topic,
 			ex.Name,
 			false,
@@ -115,15 +113,14 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		if bindErr != nil {
 			return bindErr
 		}
-		log.Printf("Successfully bound Queue %s to exchange %s", name, ex.Name)
+		log.Printf("Successfully bound Queue %s to exchange %s with routing key %s", ex.Queue, ex.Name, topic)
 	}
 
 	return nil
 }
 
 // GenerateQueueName is responsible to generate a unique queue for the connector to use
-// It follows the naming schema OpenFaaS_[EXCHANGE_NAME]_[TOPIC]
+// It follows the naming schema [EXCHANGE_NAME]_[TOPIC]
 func GenerateQueueName(ex string, topic string) string {
-	const PreFix = "OpenFaaS"
-	return fmt.Sprintf("%s_%s_%s", PreFix, ex, topic)
+	return fmt.Sprintf("%s_%s", ex, topic)
 }

@@ -16,6 +16,7 @@ import (
 type Topology []struct {
 	Name        string   `json:"name"`
 	Topics      []string `json:"topics"`
+	Queue       string   `json:"queue"`
 	Declare     bool     `json:"declare"`
 	Type        string   `json:"type,omitempty"`
 	Durable     bool     `json:"durable,omitempty"`
@@ -26,6 +27,7 @@ type Topology []struct {
 type Exchange struct {
 	Name        string
 	Topics      []string
+	Queue       string
 	Declare     bool
 	Type        string
 	Durable     bool

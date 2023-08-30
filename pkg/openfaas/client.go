@@ -80,6 +80,7 @@ func (c *Client) InvokeSync(ctx context.Context, name string, invocation *intern
 	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.Set("Content-Type", invocation.ContentType)
 	req.Header.Set("Content-Encoding", invocation.ContentEncoding)
+	req.Header.Set("Topic", invocation.Topic);
 	req.Header.SetUserAgent("OpenFaaS - Rabbit MQ Connector")
 	if c.credentials != nil {
 		credentials := c.credentials.User + ":" + c.credentials.Password
@@ -122,6 +123,7 @@ func (c *Client) InvokeAsync(ctx context.Context, name string, invocation *inter
 	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.Set("Content-Type", invocation.ContentType)
 	req.Header.Set("Content-Encoding", invocation.ContentEncoding)
+	req.Header.Set("Topic", invocation.Topic);
 	req.Header.SetUserAgent("OpenFaaS - Rabbit MQ Connector")
 	if c.credentials != nil {
 		credentials := c.credentials.User + ":" + c.credentials.Password

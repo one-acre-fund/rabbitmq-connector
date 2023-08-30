@@ -7,6 +7,7 @@ package rabbitmq
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,8 +54,8 @@ func NewExchange(channel ChannelConsumer, client types.Invoker, definition *type
 	}
 }
 
-// Start s consuming deliveries from a unique queue for the specific exchange.
-// Further creating a listener for channel errors
+// Start begins consuming deliveries from the exchange's queue.
+// It also creates a listener for channel errors.
 func (e *Exchange) Start() error {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -63,15 +64,14 @@ func (e *Exchange) Start() error {
 	e.channel.NotifyClose(closeChannel)
 	go e.handleChanFailure(closeChannel)
 
-	for _, topic := range e.definition.Topics {
-		queueName := GenerateQueueName(e.definition.Name, topic)
-		deliveries, err := e.channel.Consume(queueName, "", false, false, false, false, amqp.Table{})
-		if err != nil {
-			return err
-		}
-
-		go e.StartConsuming(topic, deliveries)
+	deliveries, err := e.channel.Consume(e.definition.Queue, "", false, false, false, false, amqp.Table{})
+	if err != nil {
+		return err
 	}
+
+	// We consume messages from the single queue associated with the exchange.
+	// The topics differentiation is handled within the consuming function.
+	go e.StartConsuming(deliveries)
 
 	return nil
 }
@@ -90,17 +90,16 @@ func (e *Exchange) handleChanFailure(ch <-chan *amqp.Error) {
 	log.Printf("Received following error %s on channel for exchange %s", err, e.definition.Name)
 }
 
-// StartConsuming will consume deliveries from the provided channel and if the received delivery
-// is for the target topic it will invoke it. If the delivery is not for the correct topic it will
-// reject it so that the delivery is returned to the exchange. Retries are exponential and up to 3 times.
-func (e *Exchange) StartConsuming(topic string, deliveries <-chan amqp.Delivery) {
+// StartConsuming will consume deliveries from the provided channel and if the received delivery's routing key
+// matches a topic we're interested in, it will invoke the respective function. If it doesn't match, it will reject the message.
+func (e *Exchange) StartConsuming(deliveries <-chan amqp.Delivery) {
 	for delivery := range deliveries {
-		if topic == delivery.RoutingKey {
-			// TODO: Maybe we want to send the deliveries into a general queue
-			// https://medium.com/justforfunc/two-ways-of-merging-n-channels-in-go-43c0b57cd1de
-			go e.handleInvocation(topic, delivery)
+		if e.isTopicOfInterest(delivery.RoutingKey) {
+			bodyStr := strings.Replace(string(delivery.Body), "\n", "", -1)
+			log.Printf("Received body %s", bodyStr)
+			go e.handleInvocation(delivery.RoutingKey, delivery)
 		} else {
-			log.Printf("Received message for topic %s that did not match subscribed topic %s will reject it", delivery.RoutingKey, topic)
+			log.Printf("Received message with topic %s for exchange %s, but it did not match any of the subscribed topics. Will reject it.", delivery.RoutingKey, e.definition.Name)
 
 			for retry := 0; retry < MaxAttempts; retry++ {
 				err := delivery.Reject(true)
@@ -115,6 +114,16 @@ func (e *Exchange) StartConsuming(topic string, deliveries <-chan amqp.Delivery)
 			log.Printf("Failed to reject delivery %d, will abort reject now", delivery.DeliveryTag)
 		}
 	}
+}
+
+// Helper function to check if a routing key (topic) is of interest to this exchange
+func (e *Exchange) isTopicOfInterest(topic string) bool {
+	for _, t := range e.definition.Topics {
+		if t == topic {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Exchange) handleInvocation(topic string, delivery amqp.Delivery) {

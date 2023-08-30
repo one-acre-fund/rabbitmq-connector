@@ -59,7 +59,7 @@ func (ch *channelMock) Close() error {
 }
 
 func TestGenerateQueueName(t *testing.T) {
-	const expected = "OpenFaaS_Dax_Wirecard"
+	const expected = "Dax_Wirecard"
 	actual := GenerateQueueName("Dax", "Wirecard")
 
 	assert.EqualValues(t, expected, actual)
@@ -79,10 +79,10 @@ func TestExchangeFactory_Build(t *testing.T) {
 		invoker := new(invokerMock)
 		channel := new(channelMock)
 		channel.On("ExchangeDeclare", "Dax", "direct", true, true, false, false, amqp.Table{}).Return(nil)
-		channel.On("QueueDeclare", "OpenFaaS_Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
-		channel.On("QueueDeclare", "OpenFaaS_Dax_BMW", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
-		channel.On("QueueBind", "OpenFaaS_Dax_Wirecard", "Wirecard", "Dax", false, amqp.Table{}).Return(nil)
-		channel.On("QueueBind", "OpenFaaS_Dax_BMW", "BMW", "Dax", false, amqp.Table{}).Return(nil)
+		channel.On("QueueDeclare", "Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
+		channel.On("QueueDeclare", "Dax_BMW", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
+		channel.On("QueueBind", "Dax_Wirecard", "Wirecard", "Dax", false, amqp.Table{}).Return(nil)
+		channel.On("QueueBind", "Dax_BMW", "BMW", "Dax", false, amqp.Table{}).Return(nil)
 
 		creator := new(creatorMock)
 		creator.On("Channel", nil).Return(channel, nil)
@@ -177,7 +177,7 @@ func TestExchangeFactory_Build(t *testing.T) {
 		invoker := new(invokerMock)
 		channel := new(channelMock)
 		channel.On("ExchangeDeclare", "Dax", "direct", true, true, false, false, amqp.Table{}).Return(nil)
-		channel.On("QueueDeclare", "OpenFaaS_Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, errors.New("failure"))
+		channel.On("QueueDeclare", "Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, errors.New("failure"))
 
 		creator := new(creatorMock)
 		creator.On("Channel", nil).Return(channel, nil)
@@ -199,8 +199,8 @@ func TestExchangeFactory_Build(t *testing.T) {
 		invoker := new(invokerMock)
 		channel := new(channelMock)
 		channel.On("ExchangeDeclare", "Dax", "direct", true, true, false, false, amqp.Table{}).Return(nil)
-		channel.On("QueueDeclare", "OpenFaaS_Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
-		channel.On("QueueBind", "OpenFaaS_Dax_Wirecard", "Wirecard", "Dax", false, amqp.Table{}).Return(errors.New("failure"))
+		channel.On("QueueDeclare", "Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
+		channel.On("QueueBind", "Dax_Wirecard", "Wirecard", "Dax", false, amqp.Table{}).Return(errors.New("failure"))
 
 		creator := new(creatorMock)
 		creator.On("Channel", nil).Return(channel, nil)

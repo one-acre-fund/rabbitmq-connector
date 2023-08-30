@@ -1,78 +1,104 @@
-# OpenFaaS RabbitMQ Connector
+# OneAcreFund's OpenFaaS RabbitMQ Connector
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/Templum/rabbitmq-connector)](https://goreportcard.com/report/github.com/Templum/rabbitmq-connector)
-[![CodeFactor](https://www.codefactor.io/repository/github/templum/rabbitmq-connector/badge)](https://www.codefactor.io/repository/github/templum/rabbitmq-connector)
-![CI](https://github.com/Templum/rabbitmq-connector/workflows/CI/badge.svg)
-![Docker Release](https://github.com/Templum/rabbitmq-connector/workflows/Docker%20Release/badge.svg)
-[![codecov](https://codecov.io/gh/Templum/rabbitmq-connector/branch/develop/graph/badge.svg)](https://codecov.io/gh/Templum/rabbitmq-connector)
+[![Go Report Card](https://goreportcard.com/badge/github.com/OneAcreFund/rabbitmq-connector)](https://goreportcard.com/report/github.com/OneAcreFund/rabbitmq-connector)
+![CI](https://github.com/OneAcreFund/rabbitmq-connector/workflows/CI/badge.svg)
+![Docker Release](https://github.com/OneAcreFund/rabbitmq-connector/workflows/Docker%20Release/badge.svg)
 
-This project is an unofficial trigger for OpenFaaS functions based on RabbitMQ Messages. Where it leverages the
-`Routing keys` to call OpenFaaS functions which listen to that `topic`. For usage information please go to [here](#Usage).
+An enhanced version of the RabbitMQ Connector for triggering OpenFaaS functions. It maps RabbitMQ messages to functions by using the `Routing keys`.
 
 ## Usage
 
-Using the [OpenFaaS CLI](https://github.com/openfaas/faas-cli) or [Rest API](https://github.com/openfaas/faas/tree/master/api-docs)
-deploy a function which has an `annotation` named `topic`, this has to be a comma-separated string of the relevant topics.
-E.g. `log,monitoring,billing`.
+Deploy your OpenFaaS function using either the [OpenFaaS CLI](https://github.com/openfaas/faas-cli) or [Rest API](https://github.com/openfaas/faas/tree/master/api-docs) with an `annotation` named `topic`, which should be a comma-separated string of relevant topics. 
 
-In case an error occurred during the invocation of the function(s) the message is attempted to be transferred back to the Queue. Therefore you should ensure your functions can handle being called potentially twice with the same payload.
+Ensure your functions can handle being invoked potentially twice with the same payload, as in the event of an error, messages will attempt re-routing back to the queue.
 
-Further the returned output from the function is ignored, as the connector currently only supports fire & forget flows.
+Please familiarize yourself with the official RabbitMQ documentation [here](https://www.rabbitmq.com/production-checklist.html) and [here](https://www.rabbitmq.com/monitoring.html) to mitigate message loss.
 
-Please also make sure to check out the official Rabbit MQ documentation [here](https://www.rabbitmq.com/production-checklist.html) and [here](https://www.rabbitmq.com/monitoring.html) in order to avoid message dropping.
+## Configuration
 
-### Configuration
+General Connector settings:
+- `basic_auth`: Toggle for basic_auth (`1` or `true`).
+- `secret_mount_path`: Path to the basic auth secret file for OpenFaaS gateway.
+- `OPEN_FAAS_GW_URL`: Defaults to `http://gateway:8080`.
+- `REQ_TIMEOUT`: Defaults to `30s`.
+- `TOPIC_MAP_REFRESH_TIME`: Defaults to `60s`.
+- `INSECURE_SKIP_VERIFY`: Defaults to `false`. Avoid enabling to prevent potential MITM attacks.
+- `MAX_CLIENT_PER_HOST`: Defaults to `256`.
 
-General Connector:
+TLS Configuration:
+- `TLS_ENABLED`: Default `false`.
+- `TLS_CA_CERT_PATH`, `TLS_SERVER_CERT_PATH`, `TLS_SERVER_KEY_PATH`: Ensure accessibility by the Go process.
 
-* `basic_auth`: Toggle to activate or deactivate basic_auth (E.g `1` || `true`)
-* `secret_mount_path`: The path to a file containing the basic auth secret for the OpenFaaS gateway
-* `OPEN_FAAS_GW_URL`: URL to the OpenFaaS gateway defaults to `http://gateway:8080`
-* `REQ_TIMEOUT`: Request Timeout for invocations of OpenFaaS functions defaults to `30s`
-* `TOPIC_MAP_REFRESH_TIME`: Refresh time for the topic map defaults to `60s`
-* `INSECURE_SKIP_VERIFY`: Allows to skip verification of HTTP Cert for Communication Connector <=> OpenFaaS default is `false`. It is recommended to keep false, as enabling it opens up the possibility of a man in the middle attack.
-* `MAX_CLIENT_PER_HOST`: Allows to specify the maximum number connections/clients that will be opened to an individual host (function), defaults to `256`.
+RabbitMQ Settings:
+- `RMQ_HOST`, `RMQ_PORT`, `RMQ_VHOST`, `RMQ_USER`, `RMQ_PASS`
+- `PATH_TO_TOPOLOGY`: Required path to the topology YAML.
 
-TLS Config:
+## Topology Configuration
 
-* `TLS_ENABLED`: Set this to `true` if your RabbitMQ requires a TLS connection. Default to `false` if not set.
-* `TLS_CA_CERT_PATH`: Path to your CA Cert, make sure golang process is allowed to access it.
-* `TLS_SERVER_CERT_PATH`: Path to Client Cert, make sure golang process is allowed to access it.
-* `TLS_SERVER_KEY_PATH`: Path to Client Key, make sure golang process is allowed to access it.
-
-> Make sure if TLS is enabled, the provided `RMQ_HOST` matches the common name from the certificate. Otherwise the connection will yield a error
-
-RabbitMQ Related:
-
-* `RMQ_HOST`: Hostname/ip of Rabbit MQ
-* `RMQ_PORT`: Port of Rabbit MQ
-* `RMQ_VHOST`: Used to specify the vhost for Rabbit MQ, will default to `/`
-* `RMQ_USER`: Defaults to "", if user and pass are both "" than no credentials will be used for connecting
-* `RMQ_PASS`: Defaults to "", if user and pass are both "" than no credentials will be used for connecting
-* `PATH_TO_TOPOLOGY`: Path to the yaml describing the topology, has _no_ default and is *required*
-
-### Topology Configuration
-
-Compared to v0 this is the biggest change, you can bring your existing Exchange definition to the connector.
-The topology is defined in the following format ([Example](./artifacts/example_topology.yaml)):
+Use your existing Exchange definitions with this new format. Example:
 
 ```yaml
-# Name of the exchange
-- name: Exchange_Name # Required
-  topics: [Foo, Bar] # Required
-  # Do we need to declare the exchange ? If it already exists it verifies that the exchange matches the configuration
-  declare: true # Default: false
-  # Either direct or topic
-  type: "direct" # Required 
-  # Persistence of Exchange between Rabbit MQ Server restarts
-  durable: false # Default: false
-  # Auto Deletes Exchange once all consumer are gone
-  auto-deleted: false # Default: false
+- name: Exchange_Name
+  topics: [Foo, Bar]
+  declare: true
+  type: "direct"
+  durable: false
+  auto-deleted: false
 ```
 
-Queues will be configured accordingly to there exchange declaration in regards to `durable` & `auto-deleted`. Further the name of the queue
-will be generated based on the following schema: `OpenFaaS_{Exchange_Name}_${Topic}`.
+Queues are configured according to their exchange declaration. Queue names follow the **`{Exchange_Name}_{Topic}`** schema.
 
-## Bug Reporting & Feature Requests
+### **Examples**
 
-Please feel free to report any issues or Feature request on the [Issue Tab](https://github.com/Templum/rabbitmq-connector/issues).
+```yaml
+- name: sapb1_items_ex
+  topics:
+    - sapb1.item.add
+    - sapb1.item.update
+  declare: true
+  type: "topic"
+  durable: true
+  auto-deleted: false
+  queue: sapb1_items_queue
+ 
+- name: sapb1_warehouse_ex
+  topics:
+    - sapb1.warehouse.add
+    - sapb1.warehouse.update
+  declare: true
+  type: "topic"
+  durable: true
+  auto-deleted: false
+  queue: sapb1_warehouse_queue
+
+```
+
+## **Kubernetes Deployment**
+
+To deploy the RabbitMQ Connector in Kubernetes:
+
+1. Apply the topology:
+    
+    ```bash
+    kubectl create cm topology --namespace=openfaas --from-file=rabbitmq-connector.topology.yaml
+    
+    ```
+    
+2. Apply the configuration:kubectl create -f rabbitmq-connector.config.yaml
+
+    
+    ```bash
+    kubectl create -f rabbitmq-connector.config.yaml
+    ```
+    
+3. Deploy the connector:
+    
+    ```bash
+    kubectl create -f rabbitmq-connector.deployment.yaml
+    
+    ```
+    
+
+## **Issues & Feature Requests**
+
+For bugs and feature requests, visit the **[Issue Tab](https://github.com/OneAcreFund/rabbitmq-connector/issues)**.
