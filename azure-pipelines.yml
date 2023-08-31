@@ -52,7 +52,7 @@ stages:
         repository: oneacrefund/rabbitmq-connector
         command: 'push'
         tags: |
-          $(IMAGE_TAGS)
+          $(VERSION_TAG)
  
     - task: PublishBuildArtifacts@1
       displayName: Publish configuration package
