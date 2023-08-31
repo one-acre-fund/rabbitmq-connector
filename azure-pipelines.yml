@@ -53,7 +53,7 @@ stages:
       
     - script: |
         docker images
-        docker push oaftech.azurecr.io/oneacrefund/rabbitmq-connector:1.0.9
+        docker push oaftech.azurecr.io/oneacrefund/rabbitmq-connector:1.0.4
       displayName: manual push to acr
 
     - task: Docker@2
