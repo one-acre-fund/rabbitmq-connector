@@ -53,17 +53,15 @@ stages:
       
     - script: docker images
       displayName: List all local images
-      
+
     - task: Docker@2
       displayName: push image to registry
       inputs:
         containerRegistry: azurecr-oaf
         repository: oaftech.azurecr.io/oneacrefund/rabbitmq-connector
-        command: 'push'
-        tags: |
-          $(VERSION_TAG)
+        command: push
+        tags: $(VERSION_TAG)
 
- 
     - task: PublishBuildArtifacts@1
       displayName: Publish configuration package
       # Only publish main branch
