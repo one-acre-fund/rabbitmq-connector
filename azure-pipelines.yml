@@ -35,8 +35,9 @@ stages:
         tags: |
           $(IMAGE_TAGS)
 
-    - script: docker tag oaftech.azurecr.io/oneacrefund/rabbitmq-connector oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(IMAGE_TAGS)
-      displayName: Explicitly tag image
+    - script: docker tag oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(IMAGE_TAGS) oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(IMAGE_TAGS)
+      displayName: Explicitly re-tag image
+
 
     - task: Docker@2
       displayName: Login to Azure registry
