@@ -17,22 +17,30 @@ stages:
     pool:
       vmImage: ubuntu-latest
     steps:
+      
     - script: |
-        FULL_TAG=$(git describe --abbrev=0 --tags 2>/dev/null || echo "1.0.0_a1bde3bad8dea1d50681e966c0ed47cb26307bdb")
-        VERSION_TAG=${FULL_TAG%%_*}
+        VERSION_TAG=`git describe --abbrev=0 --tags`
         echo "##vso[task.setvariable variable=VERSION_TAG]$VERSION_TAG"
 
         IMAGE_TAGS="${VERSION_TAG}_$(Build.SourceVersion)"
+        SPECIFIC_TAG="${IMAGE_TAGS}"
         echo "##vso[task.setvariable variable=IMAGE_SEMANTIC_HASH]$IMAGE_TAGS"
+        IMAGE_TAGS="$IMAGE_TAGS,latest"
         echo Tags: $IMAGE_TAGS
         echo "##vso[task.setvariable variable=IMAGE_TAGS]$IMAGE_TAGS"
       displayName: Get git tag
 
     - task: Docker@2
+      displayName: Login to docker registry
+      inputs:
+        containerRegistry: 'azurecr-oaf'
+        command: 'login'
+
+    - task: Docker@2
       displayName: Build an image
       inputs:
         command: build
-        dockerfile: '$(Build.SourcesDirectory)/.devcontainer/Dockerfile'
+        dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
         tags: |
           $(IMAGE_TAGS)
 
@@ -41,21 +49,25 @@ stages:
 
     - script: docker tag oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(IMAGE_TAGS) oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG)
       displayName: Explicitly re-tag image
-
+    
     - task: Docker@2
-      displayName: Login to Azure registry
+      displayName: Publish Docker image
+      condition: succeeded()
       inputs:
-        containerRegistry: azurecr-oaf
-        command: login
+        containerRegistry: 'azurecr-oaf'
+        repository: 'oneacrefund/duma'
+        command: 'push'
+        tags: |
+          $(IMAGE_TAGS)
 
-    - task: Docker@2
-      displayName: push image to registry
-      inputs:
-        containerRegistry: azurecr-oaf
-        repository: oneacrefund/rabbitmq-connector
-        command: push
-        tags: "$(IMAGE_TAGS)"
-
+    # - task: Docker@2
+    #   displayName: push image to registry
+    #   inputs:
+    #     containerRegistry: azurecr-oaf
+    #     repository: oneacrefund/rabbitmq-connector
+    #     command: push
+    #     tags: "$(IMAGE_TAGS)"
+ 
     - task: PublishBuildArtifacts@1
       displayName: Publish configuration package
       # Only publish main branch
