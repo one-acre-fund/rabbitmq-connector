@@ -19,9 +19,11 @@ stages:
     steps:
        
     - script: |
-        VERSION_TAG=`git describe --abbrev=0 --tags`
+        VERSION_TAG=$(git describe --abbrev=0 --tags 2>/dev/null || echo "1.0.4")
         echo "##vso[task.setvariable variable=VERSION_TAG]$VERSION_TAG"
-      displayName: Get git tag 
+        echo "Tag: $VERSION_TAG"
+      displayName: Get git tag
+
 
     - task: Docker@2
       displayName: Login to docker registry
@@ -40,26 +42,17 @@ stages:
     - script: docker images
       displayName: List all local images
 
-    - script: docker tag oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(SPECIFIC_TAG) oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG)
-      displayName: Explicitly re-tag image
-    
+    # - script: docker tag oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG) oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG)
+    #   displayName: Explicitly re-tag image
+     
     - task: Docker@2
-      displayName: Publish Docker image
-      condition: succeeded()
+      displayName: push image to registry
       inputs:
-        containerRegistry: 'azurecr-oaf'
-        repository: 'oneacrefund/duma'
+        containerRegistry: azurecr-oaf
+        repository: oneacrefund/rabbitmq-connector
         command: 'push'
         tags: |
           $(IMAGE_TAGS)
-
-    # - task: Docker@2
-    #   displayName: push image to registry
-    #   inputs:
-    #     containerRegistry: azurecr-oaf
-    #     repository: oneacrefund/rabbitmq-connector
-    #     command: push
-    #     tags: "$(IMAGE_TAGS)"
  
     - task: PublishBuildArtifacts@1
       displayName: Publish configuration package
