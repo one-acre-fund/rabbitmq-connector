@@ -42,17 +42,27 @@ stages:
     - script: docker images
       displayName: List all local images
 
-    # - script: docker tag oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG) oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG)
-    #   displayName: Explicitly re-tag image
-     
+    - script: echo $(VERSION_TAG)
+      displayName: Echo Version Tag
+
+    - script: |
+        IMAGE_ID=$(docker images -q | head -n 1)
+        docker tag $IMAGE_ID oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG)
+      displayName: Tag latest image
+
+      
+    - script: docker images
+      displayName: List all local images
+      
     - task: Docker@2
       displayName: push image to registry
       inputs:
         containerRegistry: azurecr-oaf
-        repository: oneacrefund/rabbitmq-connector
+        repository: oaftech.azurecr.io/oneacrefund/rabbitmq-connector
         command: 'push'
         tags: |
           $(VERSION_TAG)
+
  
     - task: PublishBuildArtifacts@1
       displayName: Publish configuration package
