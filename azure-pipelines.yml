@@ -36,8 +36,7 @@ stages:
       inputs:
         command: build
         dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
-        tags: |
-          $(VERSION_TAG)
+        tags: $(VERSION_TAG)
 
     - script: docker images
       displayName: List all local images
@@ -47,7 +46,7 @@ stages:
 
     - script: |
         IMAGE_ID=$(docker images -q | head -n 1)
-        docker tag $IMAGE_ID oaftech.azurecr.io/oneacrefund/rabbitmq-connector:$(VERSION_TAG)
+        docker tag $IMAGE_ID oneacrefund/rabbitmq-connector:$(VERSION_TAG)
       displayName: Tag latest image
 
       
@@ -58,7 +57,7 @@ stages:
       displayName: push image to registry
       inputs:
         containerRegistry: azurecr-oaf
-        repository: oaftech.azurecr.io/oneacrefund/rabbitmq-connector
+        repository: oneacrefund/rabbitmq-connector
         command: push
         tags: $(VERSION_TAG)
 
