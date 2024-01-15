@@ -85,7 +85,16 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		if err != nil {
 			return err
 		}
-		log.Printf("Successfully declared exchange %s of type %s { Durable: %t Auto-Delete: %t }", ex.Name, ex.Type, ex.Durable, ex.AutoDeleted)
+		log.Printf("Successfully declared exchange %s of type %s { Durable: %t, Auto-Delete: %t }", ex.Name, ex.Type, ex.Durable, ex.AutoDeleted)
+	}
+
+	queueArgs := amqp.Table{}
+
+	if ex.TTL > 0 {
+		queueArgs["x-message-ttl"] = ex.TTL * 1000 // Convert TTL to milliseconds
+	}
+	if ex.DeadLetterExch != "" {
+		queueArgs["x-dead-letter-exchange"] = ex.DeadLetterExch
 	}
 
 	_, declareErr := con.QueueDeclare(
@@ -94,7 +103,7 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		ex.AutoDeleted,
 		false,
 		false,
-		amqp.Table{},
+		queueArgs,
 	)
 	if declareErr != nil {
 		return declareErr
