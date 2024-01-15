@@ -91,7 +91,7 @@ func TestConnector_Run(t *testing.T) {
 			Durable            bool     `json:"durable,omitempty"`
 			AutoDeleted        bool     `json:"auto-deleted,omitempty"`
 			TTL                int      `json:"ttl,omitempty"`
-			DeadLetterExchange string   `json:"deadLetterExchange,omitempty"`
+			DeadLetterExchange string   `json:"dead-letter-exchange,omitempty"`
 		}{
 			Name:               "Nasdaq",
 			Topics:             []string{"Transport", "Billing"},
@@ -226,7 +226,7 @@ func TestConnector_handleConnectionError(t *testing.T) {
 			Durable            bool     `json:"durable,omitempty"`
 			AutoDeleted        bool     `json:"auto-deleted,omitempty"`
 			TTL                int      `json:"ttl,omitempty"`
-			DeadLetterExchange string   `json:"deadLetterExchange,omitempty"`
+			DeadLetterExchange string   `json:"dead-letter-exchange,omitempty"`
 		}{
 			Name:               "Nasdaq",
 			Topics:             []string{"Transport", "Billing"},

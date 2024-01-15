@@ -66,6 +66,8 @@ Queues are configured according to their exchange declaration. Queue names follo
   durable: true
   auto-deleted: false
   queue: sapb1_warehouse_queue
+  ttl: 6000
+  dead-letter-exchange: "rts_ex_dead_letter"
 
 ```
 

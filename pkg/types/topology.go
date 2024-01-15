@@ -22,7 +22,7 @@ type Topology []struct {
 	Durable            bool     `json:"durable,omitempty"`
 	AutoDeleted        bool     `json:"auto-deleted,omitempty"`
 	TTL                int      `json:"ttl,omitempty"`
-	DeadLetterExchange string   `json:"deadLetterExchange,omitempty"`
+	DeadLetterExchange string   `json:"dead-letter-exchange,omitempty"`
 }
 
 // Exchange Definition of a RabbitMQ Exchange
