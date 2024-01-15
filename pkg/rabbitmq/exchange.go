@@ -60,6 +60,11 @@ func (e *Exchange) Start() error {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
+	if e.definition.TTL > 0 {
+		log.Printf("Skipping processing for exchange %s because TTL is set to %d milliseconds", e.definition.Name, e.definition.TTL)
+		return nil
+	}
+
 	closeChannel := make(chan *amqp.Error)
 	e.channel.NotifyClose(closeChannel)
 	go e.handleChanFailure(closeChannel)
