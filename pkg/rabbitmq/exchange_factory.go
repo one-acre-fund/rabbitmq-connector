@@ -92,12 +92,12 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 	queueArgs := amqp.Table{}
 
 	if ex.TTL > 0 {
-		queueArgs["x-message-ttl"] = ex.TTL * 1000 // Convert TTL to milliseconds
-		log.Printf("Set TTL for queue %s to %d milliseconds", ex.Queue, ex.TTL*1000)
+		queueArgs["x-message-ttl"] = ex.TTL
+		log.Printf("Set TTL for queue %s to %d milliseconds", ex.Queue, ex.TTL)
 	}
-	if ex.DeadLetterExch != "" {
-		queueArgs["x-dead-letter-exchange"] = ex.DeadLetterExch
-		log.Printf("Set Dead Letter Exchange for queue %s to %s", ex.Queue, ex.DeadLetterExch)
+	if ex.DeadLetterExchange != "" {
+		queueArgs["x-dead-letter-exchange"] = ex.DeadLetterExchange
+		log.Printf("Set Dead Letter Exchange for queue %s to %s", ex.Queue, ex.DeadLetterExchange)
 	}
 
 	_, declareErr := con.QueueDeclare(
