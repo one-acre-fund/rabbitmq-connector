@@ -83,6 +83,7 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 	if ex.Declare {
 		err := con.ExchangeDeclare(ex.Name, ex.Type, ex.Durable, ex.AutoDeleted, false, false, amqp.Table{})
 		if err != nil {
+			log.Printf("Error declaring exchange %s: %v", ex.Name, err)
 			return err
 		}
 		log.Printf("Successfully declared exchange %s of type %s { Durable: %t, Auto-Delete: %t }", ex.Name, ex.Type, ex.Durable, ex.AutoDeleted)
@@ -92,9 +93,11 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 
 	if ex.TTL > 0 {
 		queueArgs["x-message-ttl"] = ex.TTL * 1000 // Convert TTL to milliseconds
+		log.Printf("Set TTL for queue %s to %d milliseconds", ex.Queue, ex.TTL*1000)
 	}
 	if ex.DeadLetterExch != "" {
 		queueArgs["x-dead-letter-exchange"] = ex.DeadLetterExch
+		log.Printf("Set Dead Letter Exchange for queue %s to %s", ex.Queue, ex.DeadLetterExch)
 	}
 
 	_, declareErr := con.QueueDeclare(
@@ -106,6 +109,7 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		queueArgs,
 	)
 	if declareErr != nil {
+		log.Printf("Error declaring queue %s: %v", ex.Queue, declareErr)
 		return declareErr
 	}
 	log.Printf("Successfully declared Queue %s", ex.Queue)
@@ -120,6 +124,7 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		)
 
 		if bindErr != nil {
+			log.Printf("Error binding Queue %s to exchange %s with routing key %s: %v", ex.Queue, ex.Name, topic, bindErr)
 			return bindErr
 		}
 		log.Printf("Successfully bound Queue %s to exchange %s with routing key %s", ex.Queue, ex.Name, topic)
