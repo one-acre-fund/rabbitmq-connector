@@ -83,25 +83,25 @@ func TestConnector_Run(t *testing.T) {
 		RabbitSanitizedURL:  "amqp://localhost:5672/",
 		RabbitConnectionURL: "amqp://user:pass@localhost:5672/",
 		Topology: types.Topology{struct {
-			Name               string   `json:"name"`
-			Topics             []string `json:"topics"`
-			Queue              string   `json:"queue"`
-			Declare            bool     `json:"declare"`
-			Type               string   `json:"type,omitempty"`
-			Durable            bool     `json:"durable,omitempty"`
-			AutoDeleted        bool     `json:"auto-deleted,omitempty"`
-			TTL                int      `json:"ttl,omitempty"`
-			DeadLetterExchange string   `json:"dead-letter-exchange,omitempty"`
+			Name        string   `json:"name"`
+			Topics      []string `json:"topics"`
+			Queue       string   `json:"queue"`
+			Declare     bool     `json:"declare"`
+			Type        string   `json:"type,omitempty"`
+			Durable     bool     `json:"durable,omitempty"`
+			AutoDeleted bool     `json:"auto-deleted,omitempty"`
+			TTL         int      `json:"ttl,omitempty"`
+			DLE         string   `json:"dle,omitempty"`
 		}{
-			Name:               "Nasdaq",
-			Topics:             []string{"Transport", "Billing"},
-			Queue:              "main_queue",
-			Declare:            false,
-			Type:               "direct",
-			Durable:            false,
-			AutoDeleted:        false,
-			TTL:                0,
-			DeadLetterExchange: "",
+			Name:        "Nasdaq",
+			Topics:      []string{"Transport", "Billing"},
+			Queue:       "main_queue",
+			Declare:     false,
+			Type:        "direct",
+			Durable:     false,
+			AutoDeleted: false,
+			TTL:         0,
+			DLE:         "rts_ex_dead_letter",
 		}},
 	}
 
@@ -218,25 +218,25 @@ func TestConnector_handleConnectionError(t *testing.T) {
 		RabbitSanitizedURL:  "amqp://localhost:5672/",
 		RabbitConnectionURL: "amqp://user:pass@localhost:5672/",
 		Topology: types.Topology{struct {
-			Name               string   `json:"name"`
-			Topics             []string `json:"topics"`
-			Queue              string   `json:"queue"`
-			Declare            bool     `json:"declare"`
-			Type               string   `json:"type,omitempty"`
-			Durable            bool     `json:"durable,omitempty"`
-			AutoDeleted        bool     `json:"auto-deleted,omitempty"`
-			TTL                int      `json:"ttl,omitempty"`
-			DeadLetterExchange string   `json:"dead-letter-exchange,omitempty"`
+			Name        string   `json:"name"`
+			Topics      []string `json:"topics"`
+			Queue       string   `json:"queue"`
+			Declare     bool     `json:"declare"`
+			Type        string   `json:"type,omitempty"`
+			Durable     bool     `json:"durable,omitempty"`
+			AutoDeleted bool     `json:"auto-deleted,omitempty"`
+			TTL         int      `json:"ttl,omitempty"`
+			DLE         string   `json:"dle,omitempty"`
 		}{
-			Name:               "Nasdaq",
-			Topics:             []string{"Transport", "Billing"},
-			Queue:              "main_queue",
-			Declare:            false,
-			Type:               "direct",
-			Durable:            false,
-			AutoDeleted:        false,
-			TTL:                0,
-			DeadLetterExchange: "",
+			Name:        "Nasdaq",
+			Topics:      []string{"Transport", "Billing"},
+			Queue:       "main_queue",
+			Declare:     false,
+			Type:        "direct",
+			Durable:     false,
+			AutoDeleted: false,
+			TTL:         0,
+			DLE:         "",
 		}},
 	}
 

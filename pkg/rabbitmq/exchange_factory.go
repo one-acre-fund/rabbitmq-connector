@@ -95,12 +95,12 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		queueArgs["x-message-ttl"] = ex.TTL
 		log.Printf("Set TTL for queue %s to %d milliseconds", ex.Queue, ex.TTL)
 	}
-	log.Printf("Dead Letter Exchange: %s", ex.DeadLetterExchange)
+	log.Printf("Dead Letter Exchange: %s", ex.DLE)
 	log.Printf("Exchange Configuration: %+v", ex)
 
-	if ex.DeadLetterExchange != "" {
-		queueArgs["x-dead-letter-exchange"] = ex.DeadLetterExchange
-		log.Printf("Set Dead Letter Exchange for queue %s to %s", ex.Queue, ex.DeadLetterExchange)
+	if ex.DLE != "" {
+		queueArgs["x-dead-letter-exchange"] = ex.DLE
+		log.Printf("Set Dead Letter Exchange for queue %s to %s", ex.Queue, ex.DLE)
 	}
 
 	_, declareErr := con.QueueDeclare(

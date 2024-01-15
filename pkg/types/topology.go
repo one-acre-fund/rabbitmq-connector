@@ -14,28 +14,28 @@ import (
 
 // Topology definition
 type Topology []struct {
-	Name               string   `json:"name"`
-	Topics             []string `json:"topics"`
-	Queue              string   `json:"queue"`
-	Declare            bool     `json:"declare"`
-	Type               string   `json:"type,omitempty"`
-	Durable            bool     `json:"durable,omitempty"`
-	AutoDeleted        bool     `json:"auto-deleted,omitempty"`
-	TTL                int      `json:"ttl,omitempty"`
-	DeadLetterExchange string   `json:"dead-letter-exchange,omitempty"`
+	Name        string   `json:"name"`
+	Topics      []string `json:"topics"`
+	Queue       string   `json:"queue"`
+	Declare     bool     `json:"declare"`
+	Type        string   `json:"type,omitempty"`
+	Durable     bool     `json:"durable,omitempty"`
+	AutoDeleted bool     `json:"auto-deleted,omitempty"`
+	TTL         int      `json:"ttl,omitempty"`
+	DLE         string   `json:"dle,omitempty"`
 }
 
 // Exchange Definition of a RabbitMQ Exchange
 type Exchange struct {
-	Name               string
-	Topics             []string
-	Queue              string
-	Declare            bool
-	Type               string
-	Durable            bool
-	AutoDeleted        bool
-	TTL                int
-	DeadLetterExchange string
+	Name        string
+	Topics      []string
+	Queue       string
+	Declare     bool
+	Type        string
+	Durable     bool
+	AutoDeleted bool
+	TTL         int
+	DLE         string
 }
 
 // EnsureCorrectType is responsible to make sure that the read-in type is one of the allowed
