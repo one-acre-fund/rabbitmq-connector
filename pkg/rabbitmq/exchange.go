@@ -60,8 +60,12 @@ func (e *Exchange) Start() error {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
-	if e.definition.TTL > 0 {
-		log.Printf("Skipping processing for exchange %s because TTL is set to %d milliseconds", e.definition.Name, e.definition.TTL)
+	if e.definition.SkipConsume {
+		// Log a message indicating that processing is being skipped for the specific exchange
+		// because the SkipConsume flag is set
+		log.Printf("Skipping processing for exchange %s because SkipConsume is set to %t", e.definition.Name, e.definition.SkipConsume)
+
+		// Return nil to indicate no further processing is needed
 		return nil
 	}
 

@@ -23,6 +23,7 @@ type Topology []struct {
 	AutoDeleted bool     `json:"auto-deleted,omitempty"`
 	TTL         int      `json:"ttl,omitempty"`
 	DLE         string   `json:"dle,omitempty"`
+	SkipConsume bool     `json:"skip-consume,omitempty"`
 }
 
 // Exchange Definition of a RabbitMQ Exchange
@@ -36,6 +37,7 @@ type Exchange struct {
 	AutoDeleted bool
 	TTL         int
 	DLE         string
+	SkipConsume bool `json:"skip-consume,omitempty"`
 }
 
 // EnsureCorrectType is responsible to make sure that the read-in type is one of the allowed
