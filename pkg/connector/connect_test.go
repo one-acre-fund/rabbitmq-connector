@@ -92,7 +92,7 @@ func TestConnector_Run(t *testing.T) {
 			AutoDeleted bool     `json:"auto-deleted,omitempty"`
 			TTL         int      `json:"ttl,omitempty"`
 			DLE         string   `json:"dle,omitempty"`
-			SkipConsume bool     `json:"skip-consume,omitempty"`
+			Bypass      bool     `json:"bypass,omitempty"`
 		}{
 			Name:        "Nasdaq",
 			Topics:      []string{"Transport", "Billing"},
@@ -103,7 +103,7 @@ func TestConnector_Run(t *testing.T) {
 			AutoDeleted: false,
 			TTL:         0,
 			DLE:         "rts_ex_dead_letter",
-			SkipConsume: false,
+			Bypass:      false,
 		}},
 	}
 
@@ -229,7 +229,7 @@ func TestConnector_handleConnectionError(t *testing.T) {
 			AutoDeleted bool     `json:"auto-deleted,omitempty"`
 			TTL         int      `json:"ttl,omitempty"`
 			DLE         string   `json:"dle,omitempty"`
-			SkipConsume bool     `json:"skip-consume,omitempty"`
+			Bypass      bool     `json:"bypass,omitempty"`
 		}{
 			Name:        "Nasdaq",
 			Topics:      []string{"Transport", "Billing"},
@@ -240,7 +240,7 @@ func TestConnector_handleConnectionError(t *testing.T) {
 			AutoDeleted: false,
 			TTL:         0,
 			DLE:         "",
-			SkipConsume: false,
+			Bypass:      false,
 		}},
 	}
 

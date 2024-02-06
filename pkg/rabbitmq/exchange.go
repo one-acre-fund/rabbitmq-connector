@@ -60,12 +60,12 @@ func (e *Exchange) Start() error {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
-	log.Printf("Testing for exchange %s ,  SkipConsume is set to %t", e.definition.Name, e.definition.SkipConsume)
+	log.Printf("Testing for exchange %s ,  Bypass is set to %t", e.definition.Name, e.definition.Bypass)
 
-	if e.definition.SkipConsume {
+	if e.definition.Bypass {
 		// Log a message indicating that processing is being skipped for the specific exchange
-		// because the SkipConsume flag is set
-		log.Printf("Skipping processing for exchange %s because SkipConsume is set to %t", e.definition.Name, e.definition.SkipConsume)
+		// because the Bypass flag is set
+		log.Printf("Skipping processing for exchange %s because Bypass is set to %t", e.definition.Name, e.definition.Bypass)
 
 		// Return nil to indicate no further processing is needed
 		return nil
