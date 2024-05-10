@@ -22,8 +22,8 @@ import (
 
 // Invoker defines interfaces that invoke deployed OpenFaaS Functions.
 type Invoker interface {
-	InvokeSync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) ([]byte, error)
-	InvokeAsync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) (bool, error)
+	InvokeSync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) ([]byte, int, error)
+	InvokeAsync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) (bool, int, error)
 }
 
 // NamespaceFetcher defines interfaces to explore namespaces of an OpenFaaS installation.
@@ -62,7 +62,7 @@ func NewClient(client *fasthttp.Client, creds *auth.BasicAuthCredentials, gatewa
 }
 
 // InvokeSync calls a given function in a synchronous way waiting for the response using the provided payload while considering the provided context
-func (c *Client) InvokeSync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) ([]byte, error) {
+func (c *Client) InvokeSync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) ([]byte, int, error) {
 	functionURL := fmt.Sprintf("%s/function/%s", c.url, name)
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
@@ -80,7 +80,7 @@ func (c *Client) InvokeSync(ctx context.Context, name string, invocation *intern
 	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.Set("Content-Type", invocation.ContentType)
 	req.Header.Set("Content-Encoding", invocation.ContentEncoding)
-	req.Header.Set("Topic", invocation.Topic);
+	req.Header.Set("Topic", invocation.Topic)
 	req.Header.SetUserAgent("OpenFaaS - Rabbit MQ Connector")
 	if c.credentials != nil {
 		credentials := c.credentials.User + ":" + c.credentials.Password
@@ -89,23 +89,15 @@ func (c *Client) InvokeSync(ctx context.Context, name string, invocation *intern
 
 	err := c.client.Do(req, resp)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unable to invoke function %s", name)
+		return nil, resp.StatusCode(), errors.Wrapf(err, "unable to invoke function %s", name)
 	}
 
-	switch resp.StatusCode() {
-	case fasthttp.StatusOK:
-		return resp.Body(), nil
-	case fasthttp.StatusUnauthorized:
-		return nil, errors.New("OpenFaaS Credentials are invalid")
-	case fasthttp.StatusNotFound:
-		return nil, errors.New(fmt.Sprintf("Function %s is not deployed", name))
-	default:
-		return nil, errors.New(fmt.Sprintf("Received unexpected Status Code %d", resp.StatusCode()))
-	}
+	// Return both the body and the status code
+	return resp.Body(), resp.StatusCode(), nil
 }
 
 // InvokeAsync calls a given function in a asynchronous way waiting for the response using the provided payload while considering the provided context
-func (c *Client) InvokeAsync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) (bool, error) {
+func (c *Client) InvokeAsync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) (bool, int, error) {
 	functionURL := fmt.Sprintf("%s/async-function/%s", c.url, name)
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
@@ -123,7 +115,7 @@ func (c *Client) InvokeAsync(ctx context.Context, name string, invocation *inter
 	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.Set("Content-Type", invocation.ContentType)
 	req.Header.Set("Content-Encoding", invocation.ContentEncoding)
-	req.Header.Set("Topic", invocation.Topic);
+	req.Header.Set("Topic", invocation.Topic)
 	req.Header.SetUserAgent("OpenFaaS - Rabbit MQ Connector")
 	if c.credentials != nil {
 		credentials := c.credentials.User + ":" + c.credentials.Password
@@ -132,19 +124,11 @@ func (c *Client) InvokeAsync(ctx context.Context, name string, invocation *inter
 
 	err := c.client.Do(req, resp)
 	if err != nil {
-		return false, errors.Wrapf(err, "unable to invoke function %s", name)
+		return false, resp.StatusCode(), errors.Wrapf(err, "unable to invoke function %s", name)
 	}
 
-	switch resp.StatusCode() {
-	case fasthttp.StatusAccepted:
-		return true, nil
-	case fasthttp.StatusUnauthorized:
-		return false, errors.New("OpenFaaS Credentials are invalid")
-	case fasthttp.StatusNotFound:
-		return false, errors.New(fmt.Sprintf("Function %s is not deployed", name))
-	default:
-		return false, errors.New(fmt.Sprintf("Received unexpected Status Code %d", resp.StatusCode()))
-	}
+	// Return both the body and the status code
+	return false, resp.StatusCode(), nil
 }
 
 // HasNamespaceSupport Checks if the version of OpenFaaS does support Namespace
