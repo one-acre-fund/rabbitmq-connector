@@ -72,14 +72,35 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		startTime := time.Now()
 		log.Printf("Invoking function %s for topic %s synchronously", fn, topic)
 
-		response, statusCode, err := c.client.InvokeSync(context.Background(), fn, invocation)
-		duration := time.Since(startTime)
+		var response []byte
+		var statusCode int
+		var err error
+		for i := 0; i < 3; i++ { // Retry up to 3 times for connection errors
+			response, statusCode, err = c.client.InvokeSync(context.Background(), fn, invocation)
+			if err != nil {
+				if strings.Contains(err.Error(), "no free connections available to host") {
+					log.Printf("Invocation for function %s failed due to connection error, retrying...", fn)
+					time.Sleep(100 * time.Millisecond) // Small delay before retrying
+					continue
+				}
+				log.Printf("Invocation for topic %s failed after %.2fs due to err %s", topic, time.Since(startTime).Seconds(), err)
+				return err
+			}
+			break
+		}
 
 		if err != nil {
-			log.Printf("Invocation for topic %s failed after %.2fs due to err %s", topic, duration.Seconds(), err)
-			return err
+			log.Printf("Invocation for function %s failed after retries due to err %s, switching to async", fn, err)
+			_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
+			if asyncErr != nil {
+				log.Printf("Async invocation for function %s failed due to err %s", fn, asyncErr)
+				return asyncErr
+			}
+			log.Printf("Async invocation for function %s succeeded, status code: %d", fn, asyncStatusCode)
+			return nil
 		}
-		log.Printf("Invocation for function %s succeeded in %.2fs, status code: %d, response: %s", fn, duration.Seconds(), statusCode, string(response))
+
+		log.Printf("Invocation for function %s succeeded in %.2fs, status code: %d, response: %s", fn, time.Since(startTime).Seconds(), statusCode, string(response))
 	}
 	return nil
 }
