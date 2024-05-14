@@ -43,6 +43,7 @@ func (m *TopicFunctionCache) GetCachedValues(name string) []string {
 		}
 	}
 
+	log.Printf("GetCachedValues: Topic %s, Functions: %v", name, functions)
 	return functions
 }
 
@@ -53,4 +54,5 @@ func (m *TopicFunctionCache) Refresh(update map[string][]string) {
 
 	log.Printf("Update cache with %d entries", len(update))
 	m.topicMap = update
+	log.Printf("Cache refreshed: %v", m.topicMap)
 }

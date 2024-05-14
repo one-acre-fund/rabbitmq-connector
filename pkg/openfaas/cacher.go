@@ -53,9 +53,18 @@ func (c *Controller) Start(ctx context.Context) {
 func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation) error {
 	log.Printf("Starting invocation for topic %s", topic)
 
-	functions := c.cache.GetCachedValues(topic)
+	var functions []string
+	for i := 0; i < 3; i++ { // Retry up to 3 times
+		functions = c.cache.GetCachedValues(topic)
+		if len(functions) > 0 {
+			break
+		}
+		log.Printf("No functions registered for topic %s, retrying...", topic)
+		time.Sleep(100 * time.Millisecond) // Small delay before retrying
+	}
+
 	if len(functions) == 0 {
-		log.Printf("No functions registered for topic %s", topic)
+		log.Printf("No functions registered for topic %s after retries", topic)
 		return nil
 	}
 
