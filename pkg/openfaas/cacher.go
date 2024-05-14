@@ -129,7 +129,7 @@ func (c *Controller) refreshTick(ctx context.Context, hasNamespaceSupport bool) 
 		namespaces, err = c.client.GetNamespaces(ctx)
 		if err != nil {
 			log.Printf("Received the following error during fetching namespaces %s", err)
-			namespaces = []string{}
+			return // Skip updating the cache on error
 		}
 	} else {
 		namespaces = []string{""}
@@ -138,8 +138,14 @@ func (c *Controller) refreshTick(ctx context.Context, hasNamespaceSupport bool) 
 	log.Println("Crawling for functions")
 	c.crawlFunctions(ctx, namespaces, builder)
 
-	log.Println("Crawling finished will now refresh the cache")
-	c.cache.Refresh(builder.Build())
+	log.Println("Crawling finished, will now refresh the cache")
+	newCache := builder.Build()
+	if len(newCache) == 0 {
+		log.Printf("New cache is empty, skipping cache refresh")
+		return // Skip updating the cache if the new cache is empty
+	}
+	c.cache.Refresh(newCache)
+	log.Printf("Cache refreshed successfully with %d entries", len(newCache))
 }
 
 func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, builder TopicMapBuilder) {
