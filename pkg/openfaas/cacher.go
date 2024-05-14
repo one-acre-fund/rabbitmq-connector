@@ -60,7 +60,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			break
 		}
 		log.Printf("No functions registered for topic %s, retrying...", topic)
-		time.Sleep(100 * time.Millisecond) // Small delay before retrying
+		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
 	}
 
 	if len(functions) == 0 {
@@ -80,7 +80,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			if err != nil {
 				if strings.Contains(err.Error(), "no free connections available to host") {
 					log.Printf("Invocation for function %s failed due to connection error, retrying...", fn)
-					time.Sleep(100 * time.Millisecond) // Small delay before retrying
+					time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
 					continue
 				}
 				log.Printf("Invocation for topic %s failed after %.2fs due to err %s", topic, time.Since(startTime).Seconds(), err)
@@ -91,13 +91,22 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 
 		if err != nil {
 			log.Printf("Invocation for function %s failed after retries due to err %s, switching to async", fn, err)
-			_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
-			if asyncErr != nil {
-				log.Printf("Async invocation for function %s failed due to err %s", fn, asyncErr)
-				return asyncErr
+			for i := 0; i < 3; i++ { // Retry up to 3 times for async connection errors
+				_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
+				if asyncErr != nil {
+					if strings.Contains(asyncErr.Error(), "no free connections available to host") {
+						log.Printf("Async invocation for function %s failed due to connection error, retrying...", fn)
+						time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+						continue
+					}
+					log.Printf("Async invocation for function %s failed due to err %s", fn, asyncErr)
+					return asyncErr
+				}
+				log.Printf("Async invocation for function %s succeeded, status code: %d", fn, asyncStatusCode)
+				return nil
 			}
-			log.Printf("Async invocation for function %s succeeded, status code: %d", fn, asyncStatusCode)
-			return nil
+			log.Printf("Async invocation for function %s failed after retries due to err %s", fn, err)
+			return err
 		}
 
 		log.Printf("Invocation for function %s succeeded in %.2fs, status code: %d, response: %s", fn, time.Since(startTime).Seconds(), statusCode, string(response))
