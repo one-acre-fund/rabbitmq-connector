@@ -217,10 +217,10 @@ func getTopology(fs afero.Fs) (internal.Topology, error) {
 }
 
 func getRefreshTime() time.Duration {
-	refreshTime, err := time.ParseDuration(readFromEnv(envRefreshTime, "30s"))
+	refreshTime, err := time.ParseDuration(readFromEnv(envRefreshTime, "60s"))
 	if err != nil {
-		log.Println("Provided Topicmap Refresh Time was not a valid Duration, like 30s or 60ms. Falling back to 30s")
-		refreshTime, _ = time.ParseDuration("30s")
+		log.Println("Provided Topicmap Refresh Time was not a valid Duration, like 30s or 60ms. Falling back to 60s")
+		refreshTime, _ = time.ParseDuration("60s")
 	}
 
 	return refreshTime
