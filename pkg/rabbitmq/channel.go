@@ -21,35 +21,36 @@ type ChannelConsumer interface {
 	Consume(queue string, consumer string, autoAck bool, exclusive bool, noLocal bool, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	NotifyClose(c chan *amqp.Error) chan *amqp.Error
 	Close() error
+	Qos(prefetchCount, prefetchSize int, global bool) error
 }
 
-// ExchangeHandler offers a interface for the decleration of an exchange or the validation against existing exchanges
+// ExchangeHandler offers an interface for the declaration of an exchange or the validation against existing exchanges
 // on the RabbitMQ cluster
 type ExchangeHandler interface {
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
 }
 
-// QueueHandler offers a interface for the decleration & binding of an queues. Further it allows the validation against existing queues
+// QueueHandler offers an interface for the declaration & binding of queues. Further, it allows the validation against existing queues
 // on the RabbitMQ cluster
 type QueueHandler interface {
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error
 }
 
-// RBDialer is a abstraction of the RabbitMQ Dial methods
+// RBDialer is an abstraction of the RabbitMQ Dial methods
 type RBDialer interface {
 	Dial(url string) (RBConnection, error)
 	DialTLS(url string, conf *tls.Config) (RBConnection, error)
 }
 
-// RabbitChannel is a abstraction of a RabbitMQ Channel
+// RabbitChannel is an abstraction of a RabbitMQ Channel
 type RabbitChannel interface {
 	ExchangeHandler
 	QueueHandler
 	ChannelConsumer
 }
 
-// RBConnection is a abstraction of a RabbitMQ Connection
+// RBConnection is an abstraction of a RabbitMQ Connection
 type RBConnection interface {
 	NotifyClose(receiver chan *amqp.Error) chan *amqp.Error
 	Close() error

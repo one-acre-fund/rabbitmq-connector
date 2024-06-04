@@ -1,12 +1,6 @@
-/*
- * Copyright (c) Simon Pelczer 2021. All rights reserved.
- *  Licensed under the MIT license. See LICENSE file in the project root for full license information.
- */
-
 package rabbitmq
 
 import (
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +25,14 @@ type ExchangeOrganizer interface {
 	Stopper
 }
 
+// OverallHealthMetrics tracks the overall health metrics of the connector
+type OverallHealthMetrics struct {
+	sync.Mutex
+	TotalMessages         int
+	SuccessfulInvocations int
+	FailedInvocations     int
+}
+
 // Exchange contains all of the relevant units to handle communication with an exchange
 type Exchange struct {
 	channel ChannelConsumer
@@ -38,19 +40,28 @@ type Exchange struct {
 
 	definition *types.Exchange
 	lock       sync.RWMutex
+
+	healthMetrics  *OverallHealthMetrics
+	prefetchCount  int
+	prefetchSize   int
+	prefetchGlobal bool
 }
 
 // MaxAttempts of retries that will be performed
 const MaxAttempts = 3
 
 // NewExchange creates a new exchange instance using the provided parameter
-func NewExchange(channel ChannelConsumer, client types.Invoker, definition *types.Exchange) ExchangeOrganizer {
+func NewExchange(channel ChannelConsumer, client types.Invoker, definition *types.Exchange, healthMetrics *OverallHealthMetrics, prefetchCount, prefetchSize int, prefetchGlobal bool) ExchangeOrganizer {
 	return &Exchange{
 		channel: channel,
 		client:  client,
 
-		definition: definition,
-		lock:       sync.RWMutex{},
+		definition:     definition,
+		lock:           sync.RWMutex{},
+		healthMetrics:  healthMetrics,
+		prefetchCount:  prefetchCount,
+		prefetchSize:   prefetchSize,
+		prefetchGlobal: prefetchGlobal,
 	}
 }
 
@@ -60,15 +71,25 @@ func (e *Exchange) Start() error {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
-	log.Printf("Testing for exchange %s ,  Bypass is set to %t", e.definition.Name, e.definition.Bypass)
+	logJSON("info", "Starting exchange", map[string]interface{}{
+		"exchange": e.definition.Name,
+		"bypass":   e.definition.Bypass,
+	})
 
 	if e.definition.Bypass {
-		// Log a message indicating that processing is being skipped for the specific exchange
-		// because the Bypass flag is set
-		log.Printf("Skipping processing for exchange %s because Bypass is set to %t", e.definition.Name, e.definition.Bypass)
-
-		// Return nil to indicate no further processing is needed
+		logJSON("info", "Skipping processing for exchange because Bypass is set", map[string]interface{}{
+			"exchange": e.definition.Name,
+		})
 		return nil
+	}
+
+	err := e.channel.Qos(
+		e.prefetchCount,
+		e.prefetchSize,
+		e.prefetchGlobal,
+	)
+	if err != nil {
+		return err
 	}
 
 	closeChannel := make(chan *amqp.Error)
@@ -80,49 +101,69 @@ func (e *Exchange) Start() error {
 		return err
 	}
 
-	// We consume messages from the single queue associated with the exchange.
-	// The topics differentiation is handled within the consuming function.
+	go e.logHealthStatus()
+	go e.logOverallHealthStatus()
+
 	go e.StartConsuming(deliveries)
 
 	return nil
 }
 
-// Stop s consuming messages
+// Stop stops consuming messages
 func (e *Exchange) Stop() {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
-	// We ignore the issue since this method is usually called after connection failure.
 	_ = e.channel.Close()
 }
 
 func (e *Exchange) handleChanFailure(ch <-chan *amqp.Error) {
 	err := <-ch
-	log.Printf("Received following error %s on channel for exchange %s", err, e.definition.Name)
+	logJSON("error", "Channel failure", map[string]interface{}{
+		"exchange": e.definition.Name,
+		"error":    err.Error(),
+	})
 }
 
 // StartConsuming will consume deliveries from the provided channel and if the received delivery's routing key
 // matches a topic we're interested in, it will invoke the respective function. If it doesn't match, it will reject the message.
 func (e *Exchange) StartConsuming(deliveries <-chan amqp.Delivery) {
 	for delivery := range deliveries {
+		e.healthMetrics.Lock()
+		e.healthMetrics.TotalMessages++
+		e.healthMetrics.Unlock()
+
 		if e.isTopicOfInterest(delivery.RoutingKey) {
 			bodyStr := strings.Replace(string(delivery.Body), "\n", "", -1)
-			log.Printf("Received body %s", bodyStr)
+			logJSON("info", "Received body", map[string]interface{}{
+				"body": bodyStr,
+			})
 			go e.handleInvocation(delivery.RoutingKey, delivery)
 		} else {
-			log.Printf("Received message with topic %s for exchange %s, but it did not match any of the subscribed topics. Will reject it.", delivery.RoutingKey, e.definition.Name)
+			logJSON("info", "Received message with uninteresting topic, rejecting", map[string]interface{}{
+				"exchange": e.definition.Name,
+				"topic":    delivery.RoutingKey,
+			})
 
 			for retry := 0; retry < MaxAttempts; retry++ {
 				err := delivery.Reject(true)
 				if err == nil {
+					logJSON("info", "Successfully rejected delivery", map[string]interface{}{
+						"deliveryTag": delivery.DeliveryTag,
+					})
 					return
 				}
-
-				log.Printf("Failed to reject delivery %d due to %s. Attempt %d/3", delivery.DeliveryTag, err, retry+1)
-				time.Sleep(time.Duration(retry+1*250) * time.Millisecond)
+				logJSON("error", "Failed to reject delivery", map[string]interface{}{
+					"deliveryTag": delivery.DeliveryTag,
+					"attempt":     retry + 1,
+					"error":       err.Error(),
+				})
+				time.Sleep(time.Duration(retry+1) * 250 * time.Millisecond)
 			}
 
-			log.Printf("Failed to reject delivery %d, will abort reject now", delivery.DeliveryTag)
+			logJSON("error", "Failed to reject delivery, aborting", map[string]interface{}{
+				"deliveryTag": delivery.DeliveryTag,
+			})
 		}
 	}
 }
@@ -138,32 +179,96 @@ func (e *Exchange) isTopicOfInterest(topic string) bool {
 }
 
 func (e *Exchange) handleInvocation(topic string, delivery amqp.Delivery) {
-	// Call Function via Client
 	err := e.client.Invoke(topic, types.NewInvocation(delivery))
 	if err == nil {
+		e.healthMetrics.Lock()
+		e.healthMetrics.SuccessfulInvocations++
+		e.healthMetrics.Unlock()
+
 		for retry := 0; retry < MaxAttempts; retry++ {
 			ackErr := delivery.Ack(false)
 			if ackErr == nil {
+				logJSON("info", "Successfully acknowledged delivery", map[string]interface{}{
+					"deliveryTag": delivery.DeliveryTag,
+				})
 				return
 			}
-
-			log.Printf("Failed to acknowledge delivery %d due to %s. Attempt %d/3", delivery.DeliveryTag, ackErr, retry+1)
-			time.Sleep(time.Duration(retry+1*250) * time.Millisecond)
+			logJSON("error", "Failed to acknowledge delivery", map[string]interface{}{
+				"deliveryTag": delivery.DeliveryTag,
+				"attempt":     retry + 1,
+				"error":       ackErr.Error(),
+			})
+			time.Sleep(time.Duration(retry+1) * 250 * time.Millisecond)
 		}
 
-		log.Printf("Failed to acknowledge delivery %d, will abort ack now", delivery.DeliveryTag)
+		logJSON("error", "Failed to acknowledge delivery, aborting", map[string]interface{}{
+			"deliveryTag": delivery.DeliveryTag,
+		})
 	} else {
+		e.healthMetrics.Lock()
+		e.healthMetrics.FailedInvocations++
+		e.healthMetrics.Unlock()
+
 		for retry := 0; retry < MaxAttempts; retry++ {
 			nackErr := delivery.Nack(false, true)
 			if nackErr == nil {
+				logJSON("info", "Successfully nacked delivery", map[string]interface{}{
+					"deliveryTag": delivery.DeliveryTag,
+				})
 				return
 			}
-
-			log.Printf("Failed to nack delivery %d due to %s. Attempt %d/3", delivery.DeliveryTag, nackErr, retry+1)
-			time.Sleep(time.Duration(retry+1*250) * time.Millisecond)
+			logJSON("error", "Failed to nack delivery", map[string]interface{}{
+				"deliveryTag": delivery.DeliveryTag,
+				"attempt":     retry + 1,
+				"error":       nackErr.Error(),
+			})
+			time.Sleep(time.Duration(retry+1) * 250 * time.Millisecond)
 		}
 
-		log.Printf("Failed to nack delivery %d, will abort nack now", delivery.DeliveryTag)
+		logJSON("error", "Failed to nack delivery, aborting", map[string]interface{}{
+			"deliveryTag": delivery.DeliveryTag,
+		})
 	}
+}
 
+func (e *Exchange) logHealthStatus() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		status := map[string]interface{}{
+			"@t":    time.Now().UTC().Format(time.RFC3339),
+			"@m":    "Health check status",
+			"@i":    "health-check",
+			"@l":    "Info",
+			"queue": e.definition.Queue,
+			"exchange": map[string]interface{}{
+				"name":       e.definition.Name,
+				"durable":    e.definition.Durable,
+				"autoDelete": e.definition.AutoDeleted,
+			},
+		}
+		logJSON("info", "Health check status", status)
+	}
+}
+
+func (e *Exchange) logOverallHealthStatus() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		e.healthMetrics.Lock()
+		status := map[string]interface{}{
+			"@t":                    time.Now().UTC().Format(time.RFC3339),
+			"@m":                    "Overall health check status",
+			"@i":                    "overall-health-check",
+			"@l":                    "Info",
+			"totalMessages":         e.healthMetrics.TotalMessages,
+			"successfulInvocations": e.healthMetrics.SuccessfulInvocations,
+			"failedInvocations":     e.healthMetrics.FailedInvocations,
+		}
+		e.healthMetrics.Unlock()
+
+		logJSON("info", "Overall health check status", status)
+	}
 }

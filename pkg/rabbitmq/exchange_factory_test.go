@@ -53,6 +53,11 @@ func (ch *channelMock) NotifyClose(c chan *amqp.Error) chan *amqp.Error {
 	return args.Get(0).(chan *amqp.Error)
 }
 
+func (ch *channelMock) Qos(prefetchCount, prefetchSize int, global bool) error {
+	args := ch.Called(prefetchCount, prefetchSize, global)
+	return args.Error(0)
+}
+
 func (ch *channelMock) Close() error {
 	args := ch.Called(nil)
 	return args.Error(0)

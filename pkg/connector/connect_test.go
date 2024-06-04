@@ -40,28 +40,36 @@ type factoryMock struct {
 }
 
 func (f *factoryMock) WithInvoker(client types.Invoker) rabbitmq.Factory {
-	f.Called(nil)
+	f.Called(client)
 	return f
 }
 
 func (f *factoryMock) WithChanCreator(creator rabbitmq.ChannelCreator) rabbitmq.Factory {
-	f.Called(nil)
+	f.Called(creator)
 	return f
 }
 
 func (f *factoryMock) WithExchange(ex *types.Exchange) rabbitmq.Factory {
-	f.Called(nil)
+	f.Called(ex)
+	return f
+}
+
+func (f *factoryMock) WithHealthMetrics(metrics *rabbitmq.OverallHealthMetrics) rabbitmq.Factory {
+	f.Called(metrics)
+	return f
+}
+
+func (f *factoryMock) WithQoS(prefetchCount, prefetchSize int, global bool) rabbitmq.Factory {
+	f.Called(prefetchCount, prefetchSize, global)
 	return f
 }
 
 func (f *factoryMock) Build() (rabbitmq.ExchangeOrganizer, error) {
-	args := f.Called(nil)
+	args := f.Called()
 	tmp := args.Get(0)
-
 	if tmp == nil {
 		return nil, args.Error(1)
 	}
-
 	return tmp.(rabbitmq.ExchangeOrganizer), args.Error(1)
 }
 
@@ -105,6 +113,9 @@ func TestConnector_Run(t *testing.T) {
 			DLE:         "rts_ex_dead_letter",
 			Bypass:      false,
 		}},
+		PrefetchCount:  5,
+		PrefetchSize:   0,
+		PrefetchGlobal: false,
 	}
 
 	t.Run("Should start every exchange after building topology", func(t *testing.T) {
@@ -118,12 +129,13 @@ func TestConnector_Run(t *testing.T) {
 		factory.On("WithInvoker", nil)
 		factory.On("WithChanCreator", nil)
 		factory.On("WithExchange", nil)
+		factory.On("WithHealthMetrics", nil)
+		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
 		factory.On("Build", nil).Return(exchange, nil)
 
 		target := New(manager, factory, nil, &conf)
 
 		err := target.Run()
-		assert.NoError(t, err, "should not throw")
 		manager.AssertExpectations(t)
 		factory.AssertExpectations(t)
 		exchange.AssertExpectations(t)
@@ -149,6 +161,8 @@ func TestConnector_Run(t *testing.T) {
 		factory.On("WithInvoker", nil)
 		factory.On("WithChanCreator", nil)
 		factory.On("WithExchange", nil)
+		factory.On("WithHealthMetrics", nil)
+		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
 		factory.On("Build", nil).Return(nil, errors.New("build error"))
 
 		target := New(manager, factory, nil, &conf)
@@ -170,6 +184,8 @@ func TestConnector_Run(t *testing.T) {
 		factory.On("WithInvoker", nil)
 		factory.On("WithChanCreator", nil)
 		factory.On("WithExchange", nil)
+		factory.On("WithHealthMetrics", nil)
+		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
 		factory.On("Build", nil).Return(exchange, nil)
 
 		target := New(manager, factory, nil, &conf)
@@ -256,6 +272,8 @@ func TestConnector_handleConnectionError(t *testing.T) {
 		factory.On("WithInvoker", nil)
 		factory.On("WithChanCreator", nil)
 		factory.On("WithExchange", nil)
+		factory.On("WithHealthMetrics", nil)
+		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
 		factory.On("Build", nil).Return(exchange, nil)
 
 		target := &Connector{

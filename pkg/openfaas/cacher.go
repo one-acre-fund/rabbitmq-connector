@@ -7,6 +7,7 @@ package openfaas
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -17,9 +18,6 @@ import (
 	"github.com/Templum/rabbitmq-connector/pkg/config"
 	"github.com/openfaas/faas-provider/types"
 )
-
-// Copyright (c) Simon Pelczer 2019. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 // Controller is responsible for building up and maintaining a
 // Cache with all of the deployed OpenFaaS Functions across
@@ -51,7 +49,9 @@ func (c *Controller) Start(ctx context.Context) {
 
 // Invoke triggers a call to all functions registered to the specified topic. It will abort invocation in case it encounters an error
 func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation) error {
-	log.Printf("Starting invocation for topic %s", topic)
+	c.logJSON("info", "Starting invocation for topic", map[string]interface{}{
+		"topic": topic,
+	})
 
 	var functions []string
 	for i := 0; i < 3; i++ { // Retry up to 3 times
@@ -59,18 +59,25 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		if len(functions) > 0 {
 			break
 		}
-		log.Printf("No functions registered for topic %s, retrying...", topic)
+		c.logJSON("info", "No functions registered for topic, retrying...", map[string]interface{}{
+			"topic": topic,
+		})
 		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
 	}
 
 	if len(functions) == 0 {
-		log.Printf("No functions registered for topic %s after retries", topic)
+		c.logJSON("info", "No functions registered for topic after retries", map[string]interface{}{
+			"topic": topic,
+		})
 		return nil
 	}
 
 	for _, fn := range functions {
 		startTime := time.Now()
-		log.Printf("Invoking function %s for topic %s synchronously", fn, topic)
+		c.logJSON("info", "Invoking function synchronously", map[string]interface{}{
+			"function": fn,
+			"topic":    topic,
+		})
 
 		var response []byte
 		var statusCode int
@@ -79,37 +86,63 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			response, statusCode, err = c.client.InvokeSync(context.Background(), fn, invocation)
 			if err != nil {
 				if strings.Contains(err.Error(), "no free connections available to host") {
-					log.Printf("Invocation for function %s failed due to connection error, retrying...", fn)
+					c.logJSON("error", "Invocation failed due to connection error, retrying...", map[string]interface{}{
+						"function": fn,
+					})
 					time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
 					continue
 				}
-				log.Printf("Invocation for topic %s failed after %.2fs due to err %s", topic, time.Since(startTime).Seconds(), err)
+				c.logJSON("error", "Invocation failed", map[string]interface{}{
+					"topic":  topic,
+					"error":  err,
+					"status": statusCode,
+				})
 				return err
 			}
 			break
 		}
 
 		if err != nil {
-			log.Printf("Invocation for function %s failed after retries due to err %s, switching to async", fn, err)
+			c.logJSON("error", "Invocation failed after retries, switching to async", map[string]interface{}{
+				"function": fn,
+				"error":    err,
+			})
 			for i := 0; i < 3; i++ { // Retry up to 3 times for async connection errors
 				_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
 				if asyncErr != nil {
 					if strings.Contains(asyncErr.Error(), "no free connections available to host") {
-						log.Printf("Async invocation for function %s failed due to connection error, retrying...", fn)
+						c.logJSON("error", "Async invocation failed due to connection error, retrying...", map[string]interface{}{
+							"function": fn,
+						})
 						time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
 						continue
 					}
-					log.Printf("Async invocation for function %s failed due to err %s", fn, asyncErr)
+					c.logJSON("error", "Async invocation failed", map[string]interface{}{
+						"function": fn,
+						"error":    asyncErr,
+					})
 					return asyncErr
 				}
-				log.Printf("Async invocation for function %s succeeded, status code: %d", fn, asyncStatusCode)
+				c.logJSON("info", "Async invocation succeeded", map[string]interface{}{
+					"function": fn,
+					"status":   asyncStatusCode,
+				})
 				return nil
 			}
-			log.Printf("Async invocation for function %s failed after retries due to err %s", fn, err)
+			c.logJSON("error", "Async invocation failed after retries", map[string]interface{}{
+				"function": fn,
+				"error":    err,
+			})
 			return err
 		}
 
-		log.Printf("Invocation for function %s succeeded in %.2fs, status code: %d, response: %s", fn, time.Since(startTime).Seconds(), statusCode, string(response))
+		c.logJSON("info", "Invocation succeeded", map[string]interface{}{
+			"function":  fn,
+			"duration":  time.Since(startTime).Seconds(),
+			"status":    statusCode,
+			"response":  string(response),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
 	}
 	return nil
 }
@@ -122,7 +155,7 @@ loop:
 			c.refreshTick(ctx, hasNamespaceSupport)
 			break
 		case <-ctx.Done():
-			log.Println("Received done via context will stop refreshing cache")
+			c.logJSON("info", "Received done via context will stop refreshing cache", nil)
 			break loop
 		}
 	}
@@ -134,40 +167,50 @@ func (c *Controller) refreshTick(ctx context.Context, hasNamespaceSupport bool) 
 	var err error
 
 	if hasNamespaceSupport {
-		log.Println("Crawling namespaces for functions")
+		c.logJSON("info", "Crawling namespaces for functions", nil)
 		namespaces, err = c.client.GetNamespaces(ctx)
 		if err != nil {
-			log.Printf("Received the following error during fetching namespaces %s", err)
+			c.logJSON("error", "Error fetching namespaces", map[string]interface{}{
+				"error": err,
+			})
 			return // Skip updating the cache on error
 		}
 	} else {
 		namespaces = []string{""}
 	}
 
-	log.Println("Crawling for functions")
+	c.logJSON("info", "Crawling for functions", nil)
 	c.crawlFunctions(ctx, namespaces, builder)
 
-	log.Println("Crawling finished, will now refresh the cache")
+	c.logJSON("info", "Crawling finished, refreshing cache", nil)
 	newCache := builder.Build()
 	if len(newCache) == 0 {
-		log.Printf("New cache is empty, skipping cache refresh")
+		c.logJSON("info", "New cache is empty, skipping cache refresh", nil)
 		return // Skip updating the cache if the new cache is empty
 	}
 	c.cache.Refresh(newCache)
-	log.Printf("Cache refreshed successfully with %d entries", len(newCache))
+	c.logJSON("info", "Cache refreshed successfully", map[string]interface{}{
+		"entries": len(newCache),
+	})
 }
 
 func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, builder TopicMapBuilder) {
 	for _, ns := range namespaces {
 		found, err := c.client.GetFunctions(ctx, ns)
 		if err != nil {
-			log.Printf("Received %s while fetching functions on namespace %s", err, ns)
+			c.logJSON("error", "Error fetching functions in namespace", map[string]interface{}{
+				"namespace": ns,
+				"error":     err,
+			})
 			found = []types.FunctionStatus{}
 		}
 
 		for _, fn := range found {
 			topics := c.extractTopicsFromAnnotations(fn)
-			log.Printf("Function: %s, Topics: %v", fn.Name, topics)
+			c.logJSON("info", "Found function with topics", map[string]interface{}{
+				"function": fn.Name,
+				"topics":   topics,
+			})
 
 			for _, topic := range topics {
 				if len(ns) > 0 {
@@ -191,4 +234,24 @@ func (c *Controller) extractTopicsFromAnnotations(fn types.FunctionStatus) []str
 	}
 
 	return topics
+}
+
+func (c *Controller) logJSON(level, message string, fields map[string]interface{}) {
+	logEntry := make(map[string]interface{})
+	logEntry["@t"] = time.Now().UTC().Format(time.RFC3339)
+	logEntry["@m"] = message
+	logEntry["@l"] = level
+	logEntry["Application"] = "rabbitmq-connector"
+	if fields != nil {
+		for k, v := range fields {
+			logEntry[k] = v
+		}
+	}
+
+	logData, err := json.Marshal(logEntry)
+	if err != nil {
+		log.Printf("Failed to marshal log entry: %v", err)
+		return
+	}
+	log.Println(string(logData))
 }

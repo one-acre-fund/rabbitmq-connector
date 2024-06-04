@@ -37,6 +37,10 @@ type Controller struct {
 	BasicAuth          *auth.BasicAuthCredentials
 	InsecureSkipVerify bool
 	MaxClientsPerHost  int
+
+	PrefetchCount  int
+	PrefetchSize   int
+	PrefetchGlobal bool
 }
 
 // NewConfig reads the connector config from environment variables and further validates them,
@@ -82,6 +86,21 @@ func NewConfig(fs afero.Fs) (*Controller, error) {
 		maxClients = 256
 	}
 
+	prefetchCount, err := strconv.Atoi(readFromEnv(envPrefetchCount, "5"))
+	if err != nil {
+		prefetchCount = 5
+	}
+
+	prefetchSize, err := strconv.Atoi(readFromEnv(envPrefetchSize, "0"))
+	if err != nil {
+		prefetchSize = 0
+	}
+
+	prefetchGlobal, err := strconv.ParseBool(readFromEnv(envPrefetchGlobal, "false"))
+	if err != nil {
+		prefetchGlobal = false
+	}
+
 	return &Controller{
 		GatewayURL: gatewayURL,
 		BasicAuth:  types.GetCredentials(),
@@ -96,6 +115,9 @@ func NewConfig(fs afero.Fs) (*Controller, error) {
 		TopicRefreshTime:   getRefreshTime(),
 		InsecureSkipVerify: skipVerify,
 		MaxClientsPerHost:  maxClients,
+		PrefetchCount:      prefetchCount,
+		PrefetchSize:       prefetchSize,
+		PrefetchGlobal:     prefetchGlobal,
 	}, nil
 }
 
@@ -117,6 +139,9 @@ const (
 
 	envPathToTopology = "PATH_TO_TOPOLOGY"
 	envRefreshTime    = "TOPIC_MAP_REFRESH_TIME"
+	envPrefetchCount  = "PREFETCH_COUNT"
+	envPrefetchSize   = "PREFETCH_SIZE"
+	envPrefetchGlobal = "PREFETCH_GLOBAL"
 )
 
 func getMaxClients() (int, error) {

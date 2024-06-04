@@ -17,27 +17,33 @@ func TestTopicMap(t *testing.T) {
 	update := map[string][]string{"billing": {"taxes", "notify"}}
 
 	t.Run("Should override cache with update", func(t *testing.T) {
-		cache := NewTopicFunctionCache()
+		t.Run("inner test", func(t *testing.T) {
+			cache := NewTopicFunctionCache()
 
-		before := len(cache.topicMap)
-		cache.Refresh(update)
-		after := len(cache.topicMap)
+			before := len(cache.topicMap)
+			cache.Refresh(update)
+			after := len(cache.topicMap)
 
-		assert.NotEqual(t, after, before, "Expected that the update overrides the initial value")
+			assert.NotEqual(t, after, before, "Expected that the update overrides the initial value")
+		})
 	})
 
 	t.Run("Should return all found functions for topic", func(t *testing.T) {
-		cache := NewTopicFunctionCache()
-		cache.Refresh(update)
+		t.Run("inner test", func(t *testing.T) {
+			cache := NewTopicFunctionCache()
+			cache.Refresh(update)
 
-		found := cache.GetCachedValues("billing")
-		assert.Len(t, found, 2, "Expected 2 entries for billing")
+			found := cache.GetCachedValues("billing")
+			assert.Len(t, found, 2, "Expected 2 entries for billing")
+		})
 	})
 
 	t.Run("Should return empty list if topic does not exist", func(t *testing.T) {
-		cache := NewTopicFunctionCache()
+		t.Run("inner test", func(t *testing.T) {
+			cache := NewTopicFunctionCache()
 
-		found := cache.GetCachedValues("billing")
-		assert.Len(t, found, 0, "Expected empty list for non existing topic")
+			found := cache.GetCachedValues("billing")
+			assert.Len(t, found, 0, "Expected empty list for non existing topic")
+		})
 	})
 }

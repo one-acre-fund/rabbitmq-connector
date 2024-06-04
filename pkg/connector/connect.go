@@ -6,7 +6,9 @@
 package connector
 
 import (
+	"encoding/json"
 	"log"
+	"time"
 
 	"github.com/Templum/rabbitmq-connector/pkg/config"
 	"github.com/Templum/rabbitmq-connector/pkg/rabbitmq"
@@ -44,8 +46,10 @@ type Connector struct {
 // Run starts the connector and creates a connection RabbitMQ. Further it implements the defined Topology.
 // Also it adds a listener that handles connection failures.
 func (c *Connector) Run() error {
-	log.Println("Started RabbitMQ <=> OpenFaaS Connector")
-	log.Printf("Will now establish connection to %s", c.conf.RabbitSanitizedURL)
+	c.logJSON("info", "Started RabbitMQ <=> OpenFaaS Connector", nil)
+	c.logJSON("info", "Will now establish connection", map[string]interface{}{
+		"RabbitMQ URL": c.conf.RabbitSanitizedURL,
+	})
 
 	failureChan, conErr := c.conManager.Connect(c.conf.RabbitConnectionURL)
 	if conErr != nil {
@@ -66,6 +70,8 @@ func (c *Connector) Run() error {
 		}
 	}
 
+	go c.logHealthStatus()
+
 	return nil
 }
 
@@ -73,7 +79,12 @@ func (c *Connector) Run() error {
 // Otherwise it shutsdown the whole connector
 func (c *Connector) HandleConnectionError(ch <-chan *amqp.Error) {
 	err := <-ch
-	log.Printf("Rabbit MQ Connection failed with %s Code: %d [Server=%t Recover=%t]", err.Reason, err.Code, err.Server, err.Recover)
+	c.logJSON("error", "RabbitMQ Connection failed", map[string]interface{}{
+		"reason":  err.Reason,
+		"code":    err.Code,
+		"server":  err.Server,
+		"recover": err.Recover,
+	})
 
 	if err.Recover {
 		for _, ex := range c.exchanges {
@@ -84,9 +95,15 @@ func (c *Connector) HandleConnectionError(ch <-chan *amqp.Error) {
 		c.exchanges = nil
 		err := c.Run()
 		if err != nil {
+			c.logJSON("fatal", "Received critical error during restart, shutting down", map[string]interface{}{
+				"error": err,
+			})
 			log.Panicf("Received critical error: %s during restart, shutting down", err)
 		}
 	} else {
+		c.logJSON("fatal", "Received critical error, shutting down", map[string]interface{}{
+			"error": err,
+		})
 		log.Panicf("Received critical error: %s, shutting down", err)
 	}
 }
@@ -94,7 +111,7 @@ func (c *Connector) HandleConnectionError(ch <-chan *amqp.Error) {
 // Shutdown is usually called during graceful shutdown. It stops all exchanges and finally closes the connection
 // to RabbitMQ
 func (c *Connector) Shutdown() {
-	log.Println("Shutdown RabbitMQ <=> OpenFaaS Connector")
+	c.logJSON("info", "Shutdown RabbitMQ <=> OpenFaaS Connector", nil)
 
 	// Loop over Exchanges to close
 	for _, ex := range c.exchanges {
@@ -106,7 +123,7 @@ func (c *Connector) Shutdown() {
 }
 
 func (c *Connector) generateExchangesFrom(t types.Topology) error {
-	// Do we want to use a connection per Exchange or continue with channels ?
+	// Do we want to use a connection per Exchange or continue with channels?
 	c.factory.WithChanCreator(c.conManager).WithInvoker(c.client)
 
 	for _, topology := range c.conf.Topology {
@@ -121,4 +138,38 @@ func (c *Connector) generateExchangesFrom(t types.Topology) error {
 	}
 
 	return nil
+}
+
+// logHealthStatus periodically logs the health status of the connector
+func (c *Connector) logHealthStatus() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for {
+		select {
+		case <-ticker.C:
+			c.logJSON("info", "Health status", map[string]interface{}{
+				"exchanges": len(c.exchanges),
+			})
+		}
+	}
+}
+
+// logJSON logs a message in JSON format
+func (c *Connector) logJSON(level, message string, fields map[string]interface{}) {
+	logEntry := make(map[string]interface{})
+	logEntry["@t"] = time.Now().UTC().Format(time.RFC3339)
+	logEntry["@m"] = message
+	logEntry["@l"] = level
+	logEntry["Application"] = "rabbitmq-connector"
+	if fields != nil {
+		for k, v := range fields {
+			logEntry[k] = v
+		}
+	}
+
+	logData, err := json.Marshal(logEntry)
+	if err != nil {
+		log.Printf("Failed to marshal log entry: %v", err)
+		return
+	}
+	log.Println(string(logData))
 }

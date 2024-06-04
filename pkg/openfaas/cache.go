@@ -6,8 +6,10 @@
 package openfaas
 
 import (
+	"encoding/json"
 	"log"
 	"sync"
+	"time"
 )
 
 // TopicMap defines a interface for a topic map
@@ -43,16 +45,44 @@ func (m *TopicFunctionCache) GetCachedValues(name string) []string {
 		}
 	}
 
-	log.Printf("GetCachedValues: Topic %s, Functions: %v", name, functions)
+	m.logJSON("info", "GetCachedValues", map[string]interface{}{
+		"topic":     name,
+		"functions": functions,
+	})
 	return functions
 }
 
-// Refresh updates the existing cache with new values while syncing ensuring no read conflicts
+// Refresh updates the existing cache with new values while ensuring no read conflicts
 func (m *TopicFunctionCache) Refresh(update map[string][]string) {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 
-	log.Printf("Update cache with %d entries", len(update))
+	m.logJSON("info", "Updating cache", map[string]interface{}{
+		"entries": len(update),
+	})
 	m.topicMap = update
-	log.Printf("Cache refreshed: %v", m.topicMap)
+	m.logJSON("info", "Cache refreshed", map[string]interface{}{
+		"cache": m.topicMap,
+	})
+}
+
+// logJSON logs a message in JSON format
+func (m *TopicFunctionCache) logJSON(level, message string, fields map[string]interface{}) {
+	logEntry := make(map[string]interface{})
+	logEntry["@t"] = time.Now().UTC().Format(time.RFC3339)
+	logEntry["@m"] = message
+	logEntry["@l"] = level
+	logEntry["Application"] = "rabbitmq-connector"
+	if fields != nil {
+		for k, v := range fields {
+			logEntry[k] = v
+		}
+	}
+
+	logData, err := json.Marshal(logEntry)
+	if err != nil {
+		log.Printf("Failed to marshal log entry: %v", err)
+		return
+	}
+	log.Println(string(logData))
 }

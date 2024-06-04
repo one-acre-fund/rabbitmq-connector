@@ -6,19 +6,23 @@
 package rabbitmq
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/Templum/rabbitmq-connector/pkg/types"
 	"github.com/streadway/amqp"
 )
 
-// Factory for building a Exchange
+// Factory for building an Exchange
 type Factory interface {
 	WithInvoker(client types.Invoker) Factory
 	WithChanCreator(creator ChannelCreator) Factory
 	WithExchange(ex *types.Exchange) Factory
+	WithHealthMetrics(metrics *OverallHealthMetrics) Factory
+	WithQoS(prefetchCount, prefetchSize int, global bool) Factory
 	Build() (ExchangeOrganizer, error)
 }
 
@@ -29,9 +33,13 @@ func NewFactory() Factory {
 
 // ExchangeFactory keeps tracks of all the build options provided to it during construction
 type ExchangeFactory struct {
-	creator  ChannelCreator
-	client   types.Invoker
-	exchange *types.Exchange
+	creator       ChannelCreator
+	client        types.Invoker
+	exchange      *types.Exchange
+	healthMetrics *OverallHealthMetrics
+	prefetchCount int
+	prefetchSize  int
+	global        bool
 }
 
 // WithChanCreator sets the channel creator that will be used
@@ -48,9 +56,25 @@ func (f *ExchangeFactory) WithInvoker(client types.Invoker) Factory {
 
 // WithExchange sets the exchange definition and further ensures that the correct type is used
 func (f *ExchangeFactory) WithExchange(ex *types.Exchange) Factory {
-	log.Printf("Factory is configured for exchange %s", ex.Name)
+	logJSON("info", "Factory configured for exchange", map[string]interface{}{
+		"exchange": ex.Name,
+	})
 	ex.EnsureCorrectType()
 	f.exchange = ex
+	return f
+}
+
+// WithHealthMetrics sets the health metrics to be used
+func (f *ExchangeFactory) WithHealthMetrics(metrics *OverallHealthMetrics) Factory {
+	f.healthMetrics = metrics
+	return f
+}
+
+// WithQoS sets the QoS settings to be used
+func (f *ExchangeFactory) WithQoS(prefetchCount, prefetchSize int, global bool) Factory {
+	f.prefetchCount = prefetchCount
+	f.prefetchSize = prefetchSize
+	f.global = global
 	return f
 }
 
@@ -65,6 +89,9 @@ func (f *ExchangeFactory) Build() (ExchangeOrganizer, error) {
 	if f.exchange == nil {
 		return nil, errors.New("no exchange configured")
 	}
+	if f.healthMetrics == nil {
+		return nil, errors.New("no health metrics provided")
+	}
 
 	channel, err := f.creator.Channel()
 	if err != nil {
@@ -76,31 +103,61 @@ func (f *ExchangeFactory) Build() (ExchangeOrganizer, error) {
 		return nil, topologyErr
 	}
 
-	return NewExchange(channel, f.client, f.exchange), nil
+	// Apply QoS settings
+	err = channel.Qos(f.prefetchCount, f.prefetchSize, f.global)
+	if err != nil {
+		logJSON("error", "Error applying QoS settings", map[string]interface{}{
+			"prefetch_count": f.prefetchCount,
+			"prefetch_size":  f.prefetchSize,
+			"global":         f.global,
+			"error":          err,
+		})
+		return nil, err
+	}
+
+	return NewExchange(channel, f.client, f.exchange, f.healthMetrics, f.prefetchCount, f.prefetchSize, f.global), nil
 }
 
 func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 	if ex.Declare {
 		err := con.ExchangeDeclare(ex.Name, ex.Type, ex.Durable, ex.AutoDeleted, false, false, amqp.Table{})
 		if err != nil {
-			log.Printf("Error declaring exchange %s: %v", ex.Name, err)
+			logJSON("error", "Error declaring exchange", map[string]interface{}{
+				"exchange": ex.Name,
+				"error":    err,
+			})
 			return err
 		}
-		log.Printf("Successfully declared exchange %s of type %s { Durable: %t, Auto-Delete: %t }", ex.Name, ex.Type, ex.Durable, ex.AutoDeleted)
+		logJSON("info", "Successfully declared exchange", map[string]interface{}{
+			"exchange":   ex.Name,
+			"type":       ex.Type,
+			"durable":    ex.Durable,
+			"autoDelete": ex.AutoDeleted,
+		})
 	}
 
 	queueArgs := amqp.Table{}
 
 	if ex.TTL > 0 {
 		queueArgs["x-message-ttl"] = ex.TTL
-		log.Printf("Set TTL for queue %s to %d milliseconds", ex.Queue, ex.TTL)
+		logJSON("info", "Set TTL for queue", map[string]interface{}{
+			"queue": ex.Queue,
+			"ttl":   ex.TTL,
+		})
 	}
-	log.Printf("Dead Letter Exchange: %s", ex.DLE)
-	log.Printf("Exchange Configuration: %+v", ex)
+	logJSON("info", "Dead Letter Exchange", map[string]interface{}{
+		"deadLetterExchange": ex.DLE,
+	})
+	logJSON("info", "Exchange Configuration", map[string]interface{}{
+		"exchangeConfig": ex,
+	})
 
 	if ex.DLE != "" {
 		queueArgs["x-dead-letter-exchange"] = ex.DLE
-		log.Printf("Set Dead Letter Exchange for queue %s to %s", ex.Queue, ex.DLE)
+		logJSON("info", "Set Dead Letter Exchange for queue", map[string]interface{}{
+			"queue":              ex.Queue,
+			"deadLetterExchange": ex.DLE,
+		})
 	}
 
 	_, declareErr := con.QueueDeclare(
@@ -112,10 +169,15 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		queueArgs,
 	)
 	if declareErr != nil {
-		log.Printf("Error declaring queue %s: %v", ex.Queue, declareErr)
+		logJSON("error", "Error declaring queue", map[string]interface{}{
+			"queue": ex.Queue,
+			"error": declareErr,
+		})
 		return declareErr
 	}
-	log.Printf("Successfully declared Queue %s", ex.Queue)
+	logJSON("info", "Successfully declared Queue", map[string]interface{}{
+		"queue": ex.Queue,
+	})
 
 	for _, topic := range ex.Topics {
 		bindErr := con.QueueBind(
@@ -127,10 +189,19 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 		)
 
 		if bindErr != nil {
-			log.Printf("Error binding Queue %s to exchange %s with routing key %s: %v", ex.Queue, ex.Name, topic, bindErr)
+			logJSON("error", "Error binding Queue to exchange with routing key", map[string]interface{}{
+				"queue":      ex.Queue,
+				"exchange":   ex.Name,
+				"routingKey": topic,
+				"error":      bindErr,
+			})
 			return bindErr
 		}
-		log.Printf("Successfully bound Queue %s to exchange %s with routing key %s", ex.Queue, ex.Name, topic)
+		logJSON("info", "Successfully bound Queue to exchange with routing key", map[string]interface{}{
+			"queue":      ex.Queue,
+			"exchange":   ex.Name,
+			"routingKey": topic,
+		})
 	}
 
 	return nil
@@ -140,4 +211,24 @@ func declareTopology(con RabbitChannel, ex *types.Exchange) error {
 // It follows the naming schema [EXCHANGE_NAME]_[TOPIC]
 func GenerateQueueName(ex string, topic string) string {
 	return fmt.Sprintf("%s_%s", ex, topic)
+}
+
+func logJSON(level, message string, fields map[string]interface{}) {
+	logEntry := make(map[string]interface{})
+	logEntry["@t"] = time.Now().UTC().Format(time.RFC3339)
+	logEntry["@m"] = message
+	logEntry["@l"] = level
+	logEntry["Application"] = "rabbitmq-connector"
+	if fields != nil {
+		for k, v := range fields {
+			logEntry[k] = v
+		}
+	}
+
+	logData, err := json.Marshal(logEntry)
+	if err != nil {
+		log.Printf("Failed to marshal log entry: %v", err)
+		return
+	}
+	log.Println(string(logData))
 }

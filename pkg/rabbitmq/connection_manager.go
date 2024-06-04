@@ -7,6 +7,7 @@ package rabbitmq
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"log"
 	"sync"
 	"time"
@@ -15,20 +16,36 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// Connector is a high level interface for connection related methods
+// LogJSON is a helper function to log messages in JSON format
+func LogJSON(level, message, application string, fields map[string]interface{}) {
+	logData := map[string]interface{}{
+		"@t":          time.Now().UTC().Format(time.RFC3339),
+		"@m":          message,
+		"@i":          level,
+		"@l":          "Info",
+		"Application": application,
+	}
+	for k, v := range fields {
+		logData[k] = v
+	}
+	logJSON, _ := json.Marshal(logData)
+	log.Println(string(logJSON))
+}
+
+// Connector is a high-level interface for connection-related methods
 type Connector interface {
 	Connect(connectionURL string) (<-chan *amqp.Error, error)
 	Disconnect()
 }
 
-// Manager is a interface that combines the relevant methods to connect to Rabbit MQ
+// Manager is an interface that combines the relevant methods to connect to Rabbit MQ
 // And create a new channel on an existing connection.
 type Manager interface {
 	Connector
 	ChannelCreator
 }
 
-// ConnectionManager is tasked with managing the connection Rabbit MQ
+// ConnectionManager is tasked with managing the connection to Rabbit MQ
 type ConnectionManager struct {
 	con     RBConnection
 	lock    sync.RWMutex
@@ -54,7 +71,7 @@ func (m *ConnectionManager) Connect(connectionURL string) (<-chan *amqp.Error, e
 		con, err := m.dial(connectionURL)
 
 		if err == nil {
-			log.Println("Successfully established connection to Rabbit MQ Cluster")
+			LogJSON("info", "Successfully established connection to Rabbit MQ Cluster", "rabbitmq-connector", nil)
 			m.lock.Lock()
 			m.con = con
 			m.lock.Unlock()
@@ -64,7 +81,10 @@ func (m *ConnectionManager) Connect(connectionURL string) (<-chan *amqp.Error, e
 			return closeChannel, nil
 		}
 
-		log.Printf("Failed to establish connection due to %s. Attempt: %d/3", err, attempt)
+		LogJSON("error", "Failed to establish connection", "rabbitmq-connector", map[string]interface{}{
+			"error":   err.Error(),
+			"attempt": attempt + 1,
+		})
 		time.Sleep(time.Duration(2*attempt+1) * time.Second)
 	}
 
@@ -74,14 +94,16 @@ func (m *ConnectionManager) Connect(connectionURL string) (<-chan *amqp.Error, e
 // Disconnect closes the connection and frees up the reference
 func (m *ConnectionManager) Disconnect() {
 	m.lock.Lock()
+	defer m.lock.Unlock()
 
 	err := m.con.Close()
 	if err != nil {
-		log.Printf("Received %s during closing connection", err)
+		LogJSON("error", "Received error during closing connection", "rabbitmq-connector", map[string]interface{}{
+			"error": err.Error(),
+		})
 	}
 
 	m.con = nil
-	m.lock.Unlock()
 }
 
 // Channel creates a new Rabbit MQ channel on the existing connection
