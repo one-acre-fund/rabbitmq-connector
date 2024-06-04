@@ -82,22 +82,15 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		var response []byte
 		var statusCode int
 		var err error
-		for i := 0; i < 3; i++ { // Retry up to 3 times for connection errors
+		for i := 0; i < 3; i++ { // Retry up to 3 times for any errors
 			response, statusCode, err = c.client.InvokeSync(context.Background(), fn, invocation)
 			if err != nil {
-				if strings.Contains(err.Error(), "no free connections available to host") {
-					c.logJSON("error", "Invocation failed due to connection error, retrying...", map[string]interface{}{
-						"function": fn,
-					})
-					time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
-					continue
-				}
-				c.logJSON("error", "Invocation failed", map[string]interface{}{
-					"topic":  topic,
-					"error":  err,
-					"status": statusCode,
+				c.logJSON("error", "Invocation failed, retrying...", map[string]interface{}{
+					"function": fn,
+					"error":    err,
 				})
-				return err
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+				continue
 			}
 			break
 		}
@@ -107,21 +100,15 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 				"function": fn,
 				"error":    err,
 			})
-			for i := 0; i < 3; i++ { // Retry up to 3 times for async connection errors
+			for i := 0; i < 3; i++ { // Retry up to 3 times for async errors
 				_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
 				if asyncErr != nil {
-					if strings.Contains(asyncErr.Error(), "no free connections available to host") {
-						c.logJSON("error", "Async invocation failed due to connection error, retrying...", map[string]interface{}{
-							"function": fn,
-						})
-						time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
-						continue
-					}
-					c.logJSON("error", "Async invocation failed", map[string]interface{}{
+					c.logJSON("error", "Async invocation failed, retrying...", map[string]interface{}{
 						"function": fn,
 						"error":    asyncErr,
 					})
-					return asyncErr
+					time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+					continue
 				}
 				c.logJSON("info", "Async invocation succeeded", map[string]interface{}{
 					"function": fn,
