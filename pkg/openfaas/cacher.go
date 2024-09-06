@@ -213,7 +213,23 @@ func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool 
 }
 
 // evaluateCondition returns (bool, bool) where the first bool is whether the condition passed and the second is whether the key existed in the payload.
+// evaluateCondition returns (bool, bool) where the first bool is whether the condition passed and the second is whether the key existed in the payload.
 func evaluateCondition(condition string, payload map[string]interface{}) (bool, bool) {
+	// Helper function to retrieve value from nested map
+	getNestedValue := func(key string, data map[string]interface{}) (interface{}, bool) {
+		parts := strings.Split(key, ".")
+		var current interface{} = data
+
+		for _, part := range parts {
+			if m, ok := current.(map[string]interface{}); ok {
+				current = m[part]
+			} else {
+				return nil, false
+			}
+		}
+		return current, true
+	}
+
 	// Handle Contains check first (e.g., id.Contains("Gonzalo"))
 	if strings.Contains(condition, "Contains(") {
 		containsIndex := strings.Index(condition, "Contains(")
@@ -226,8 +242,8 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 		key = strings.TrimSuffix(key, ".")                  // Ensure no trailing dot
 		containsValue := strings.Trim(strings.TrimSuffix(strings.TrimSpace(condition[containsIndex+9:]), ")"), `"`)
 
-		// Get the actual value from the payload
-		actualValue, ok := payload[key]
+		// Get the actual value from the payload (handle nested keys)
+		actualValue, ok := getNestedValue(key, payload)
 		if !ok {
 			// Key not found in payload, ignore this condition
 			return false, false
@@ -247,8 +263,8 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 		key := strings.TrimSpace(parts[0])
 		expectedValue := strings.Trim(strings.TrimSpace(parts[1]), `"`)
 
-		// Get the actual value from the payload
-		actualValue, ok := payload[key]
+		// Get the actual value from the payload (handle nested keys)
+		actualValue, ok := getNestedValue(key, payload)
 		if !ok {
 			// Key not found in payload, ignore this condition
 			return false, false
@@ -271,8 +287,8 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 			return false, false
 		}
 
-		// Get the actual value from the payload
-		actualValue, ok := payload[key]
+		// Get the actual value from the payload (handle nested keys)
+		actualValue, ok := getNestedValue(key, payload)
 		if !ok {
 			// Key not found in payload, ignore this condition
 			return false, false
@@ -301,8 +317,8 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 			return false, false
 		}
 
-		// Get the actual value from the payload
-		actualValue, ok := payload[key]
+		// Get the actual value from the payload (handle nested keys)
+		actualValue, ok := getNestedValue(key, payload)
 		if !ok {
 			// Key not found in payload, ignore this condition
 			return false, false
@@ -331,8 +347,8 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 			return false, false
 		}
 
-		// Get the actual value from the payload
-		actualValue, ok := payload[key]
+		// Get the actual value from the payload (handle nested keys)
+		actualValue, ok := getNestedValue(key, payload)
 		if !ok {
 			// Key not found in payload, ignore this condition
 			return false, false
@@ -361,8 +377,8 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 			return false, false
 		}
 
-		// Get the actual value from the payload
-		actualValue, ok := payload[key]
+		// Get the actual value from the payload (handle nested keys)
+		actualValue, ok := getNestedValue(key, payload)
 		if !ok {
 			// Key not found in payload, ignore this condition
 			return false, false
