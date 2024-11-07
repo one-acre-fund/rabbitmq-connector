@@ -9,12 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/Knetic/govaluate"
-	types2 "github.com/Templum/rabbitmq-connector/pkg/types"
 	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Knetic/govaluate"
+	types2 "github.com/Templum/rabbitmq-connector/pkg/types"
 
 	"github.com/Templum/rabbitmq-connector/pkg/config"
 	"github.com/openfaas/faas-provider/types"
@@ -49,13 +50,15 @@ func (c *Controller) Start(ctx context.Context) {
 }
 
 // Invoke triggers a call to all functions registered to the specified topic. It will abort invocation in case it encounters an error
+// Modify Invoke to handle function-specific filters while keeping existing retry logic
 func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation) error {
 	c.logJSON("info", "Starting invocation for topic", map[string]interface{}{
-		"topic": topic,
+		"topic":       topic,
+		"contentType": invocation.ContentType, // Log the content type
 	})
 
 	var functions []string
-	for i := 0; i < 3; i++ { // Retry up to 3 times
+	for i := 0; i < 3; i++ {
 		functions = c.cache.GetCachedValues(topic)
 		if len(functions) > 0 {
 			break
@@ -63,7 +66,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		c.logJSON("info", "No functions registered for topic, retrying...", map[string]interface{}{
 			"topic": topic,
 		})
-		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
 	}
 
 	if len(functions) == 0 {
@@ -73,20 +76,32 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		return nil
 	}
 
-	// Get the cached filter for the topic, which already includes topic-specific, wildcard, and global filters
-	cachedFilter := c.cache.GetCachedFilter(topic)
-
 	for _, fn := range functions {
+		// Log the start of processing each function
+		c.logJSON("info", "Processing function", map[string]interface{}{
+			"function": fn,
+			"topic":    topic,
+		})
 
-		// Only log if there's an actual filter to apply
+		cachedFilter := c.cache.GetCachedFilter(topic, fn)
+
 		if cachedFilter != "" {
 			c.logJSON("info", "Applying cached filter for function", map[string]interface{}{
 				"function":     fn,
 				"cachedFilter": cachedFilter,
 			})
 
-			// Apply the cached filter
-			if !c.applyAllFilters(cachedFilter, invocation.Message) {
+			filterResult := c.applyAllFilters(cachedFilter, invocation.Message)
+
+			// Log filter evaluation result
+			c.logJSON("info", "Filter evaluation result", map[string]interface{}{
+				"function": fn,
+				"result":   filterResult,
+				"filter":   cachedFilter,
+				"message":  string(*invocation.Message),
+			})
+
+			if !filterResult {
 				c.logJSON("info", "Filters did not match, skipping function", map[string]interface{}{
 					"function": fn,
 				})
@@ -94,19 +109,44 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			}
 		}
 
+		// Ensure content type is set if not already
+		if invocation.ContentType == "" {
+			invocation.ContentType = "application/json"
+			c.logJSON("info", "Set default content type", map[string]interface{}{
+				"function":    fn,
+				"contentType": invocation.ContentType,
+			})
+		}
+
+		// Log attempt details
+		c.logJSON("info", "Starting function invocation", map[string]interface{}{
+			"function":    fn,
+			"topic":       topic,
+			"contentType": invocation.ContentType,
+			"message":     string(*invocation.Message),
+		})
+
 		startTime := time.Now()
-		// Proceed with function invocation if the filter passed
 		var response []byte
 		var statusCode int
 		var err error
-		for i := 0; i < 3; i++ { // Retry up to 3 times for any errors
+
+		// Sync invocation with retries
+		for i := 0; i < 3; i++ {
+			c.logJSON("info", "Attempting sync invocation", map[string]interface{}{
+				"function":    fn,
+				"attempt":     i + 1,
+				"contentType": invocation.ContentType,
+			})
+
 			response, statusCode, err = c.client.InvokeSync(context.Background(), fn, invocation)
 			if err != nil {
 				c.logJSON("error", "Invocation failed, retrying...", map[string]interface{}{
 					"function": fn,
 					"error":    err,
+					"attempt":  i + 1,
 				})
-				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
 				continue
 			}
 			break
@@ -117,22 +157,32 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 				"function": fn,
 				"error":    err,
 			})
-			for i := 0; i < 3; i++ { // Retry up to 3 times for async errors
+
+			// Async fallback with retries
+			for i := 0; i < 3; i++ {
+				c.logJSON("info", "Attempting async invocation", map[string]interface{}{
+					"function": fn,
+					"attempt":  i + 1,
+				})
+
 				_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
 				if asyncErr != nil {
 					c.logJSON("error", "Async invocation failed, retrying...", map[string]interface{}{
 						"function": fn,
 						"error":    asyncErr,
+						"attempt":  i + 1,
 					})
-					time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+					time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
 					continue
 				}
+
 				c.logJSON("info", "Async invocation succeeded", map[string]interface{}{
 					"function": fn,
 					"status":   asyncStatusCode,
 				})
 				return nil
 			}
+
 			c.logJSON("error", "Async invocation failed after retries", map[string]interface{}{
 				"function": fn,
 				"error":    err,
@@ -141,11 +191,12 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		}
 
 		c.logJSON("info", "Invocation succeeded", map[string]interface{}{
-			"function":  fn,
-			"duration":  time.Since(startTime).Seconds(),
-			"status":    statusCode,
-			"response":  string(response),
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"function":    fn,
+			"duration":    time.Since(startTime).Seconds(),
+			"status":      statusCode,
+			"response":    string(response),
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+			"contentType": invocation.ContentType,
 		})
 	}
 	return nil
@@ -212,23 +263,35 @@ func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool 
 	return false
 }
 
-// evaluateCondition returns (bool, bool) where the first bool is whether the condition passed and the second is whether the key existed in the payload.
+func getNestedValue(key string, data map[string]interface{}) (interface{}, bool) {
+	parts := strings.Split(key, ".")
+	var current interface{} = data
+
+	for _, part := range parts {
+		if m, ok := current.(map[string]interface{}); ok {
+			// Try exact match first
+			if val, exists := m[part]; exists {
+				current = val
+				continue
+			}
+
+			// Case-insensitive lookup
+			lowerPart := strings.ToLower(part)
+			for k, v := range m {
+				if strings.ToLower(k) == lowerPart {
+					current = v
+					break
+				}
+			}
+		} else {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
 // evaluateCondition returns (bool, bool) where the first bool is whether the condition passed and the second is whether the key existed in the payload.
 func evaluateCondition(condition string, payload map[string]interface{}) (bool, bool) {
-	// Helper function to retrieve value from nested map
-	getNestedValue := func(key string, data map[string]interface{}) (interface{}, bool) {
-		parts := strings.Split(key, ".")
-		var current interface{} = data
-
-		for _, part := range parts {
-			if m, ok := current.(map[string]interface{}); ok {
-				current = m[part]
-			} else {
-				return nil, false
-			}
-		}
-		return current, true
-	}
 
 	// Handle Contains check first (e.g., id.Contains("Gonzalo"))
 	if strings.Contains(condition, "Contains(") {
@@ -237,20 +300,20 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 			return false, false
 		}
 
-		// Extract key and value from Contains condition
-		key := strings.TrimSpace(condition[:containsIndex]) // Extract key before 'Contains'
-		key = strings.TrimSuffix(key, ".")                  // Ensure no trailing dot
+		key := strings.TrimSpace(condition[:containsIndex])
+		key = strings.TrimSuffix(key, ".")
 		containsValue := strings.Trim(strings.TrimSuffix(strings.TrimSpace(condition[containsIndex+9:]), ")"), `"`)
 
-		// Get the actual value from the payload (handle nested keys)
 		actualValue, ok := getNestedValue(key, payload)
 		if !ok {
-			// Key not found in payload, ignore this condition
 			return false, false
 		}
 
-		// Check if the actual value contains the expected substring
-		return strings.Contains(fmt.Sprintf("%v", actualValue), containsValue), true
+		// Case-insensitive contains check
+		return strings.Contains(
+			strings.ToLower(fmt.Sprintf("%v", actualValue)),
+			strings.ToLower(containsValue),
+		), true
 	}
 
 	// Handle equality checks (e.g., ref == "boy")
@@ -398,28 +461,6 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 	return false, false
 }
 
-func (c *Controller) getFilterForTopic(topic string) string {
-	// Check for a topic-specific filter first
-	filter := c.cache.GetCachedFilter(topic)
-
-	// If no topic-specific filter is found, check for a wildcard filter (e.g., "sanction.screen.all")
-	if filter == "" {
-		// Create a wildcard pattern by taking the first two segments of the topic
-		topicParts := strings.Split(topic, ".")
-		if len(topicParts) > 1 {
-			topicPrefix := strings.Join(topicParts[:2], ".")
-			filter = c.cache.GetCachedFilter("filter-" + topicPrefix + ".all")
-		}
-	}
-
-	// If still no filter is found, check for a global filter ("filter-all")
-	if filter == "" {
-		filter = c.cache.GetCachedFilter("filter-all")
-	}
-
-	return filter
-}
-
 func (c *Controller) applyFilter(filter string, message *[]byte) bool {
 	var payload map[string]interface{}
 
@@ -554,6 +595,8 @@ func (c *Controller) refreshTick(ctx context.Context, hasNamespaceSupport bool) 
 		"entries": len(topicMap),
 	})
 }
+
+// Only modify the minimum required parts of crawlFunctions while preserving logging and other logic
 func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, builder TopicMapBuilder) {
 	for _, ns := range namespaces {
 		found, err := c.client.GetFunctions(ctx, ns)
@@ -576,7 +619,7 @@ func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, bu
 			})
 
 			for _, topic := range topics {
-				// String to store combined filters
+				// Store filters specific to this function
 				finalFilter := ""
 
 				// Step 1: Append specific filter if it exists
@@ -596,11 +639,12 @@ func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, bu
 				}
 
 				c.logJSON("info", "Combined filters for topic", map[string]interface{}{
-					"filters": finalFilter,
-					"topic":   topic,
+					"filters":  finalFilter,
+					"topic":    topic,
+					"function": fn.Name, // Add function name to logging
 				})
 
-				// Cache the final combined filter
+				// Cache the final combined filter with function name
 				builder.AppendWithFilter(strings.TrimSpace(topic), fn.Name, finalFilter)
 			}
 		}

@@ -101,8 +101,8 @@ func (e *Exchange) Start() error {
 		return err
 	}
 
-	go e.logHealthStatus()
-	go e.logOverallHealthStatus()
+	// go e.logHealthStatus()
+	// go e.logOverallHealthStatus()
 
 	go e.StartConsuming(deliveries)
 

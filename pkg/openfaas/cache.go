@@ -15,24 +15,24 @@ import (
 // TopicMap defines a interface for a topic map
 type TopicMap interface {
 	GetCachedValues(name string) []string
-	GetCachedFilter(name string) string
+	GetCachedFilter(topic string, functionName string) string
 	Refresh(topicMap map[string][]string)
-	RefreshFilters(filterMap map[string]string)
+	RefreshFilters(filterMap map[string]map[string]string)
 }
 
 // TopicFunctionCache contains a map of topics to functions and filters
 type TopicFunctionCache struct {
-	topicMap  map[string][]string
-	filterMap map[string]string
-	lock      sync.RWMutex
+	topicMap       map[string][]string
+	functionFilter map[string]map[string]string // map[functionName]map[topic]filter
+	lock           sync.RWMutex
 }
 
 // NewTopicFunctionCache returns a new instance with both topic and filter maps
 func NewTopicFunctionCache() *TopicFunctionCache {
 	return &TopicFunctionCache{
-		topicMap:  make(map[string][]string),
-		filterMap: make(map[string]string),
-		lock:      sync.RWMutex{},
+		topicMap:       make(map[string][]string),
+		functionFilter: make(map[string]map[string]string),
+		lock:           sync.RWMutex{},
 	}
 }
 
@@ -57,57 +57,60 @@ func (m *TopicFunctionCache) GetCachedValues(name string) []string {
 }
 
 // GetCachedFilter retrieves the filter associated with a topic, wildcard, or global filters
-func (m *TopicFunctionCache) GetCachedFilter(topic string) string {
+func (m *TopicFunctionCache) GetCachedFilter(topic string, functionName string) string {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 
-	// First, check if a topic-specific filter exists
-	if filter, exists := m.filterMap[topic]; exists && filter != "" {
-		m.logJSON("info", "Found topic-specific filter", map[string]interface{}{
-			"topic":  topic,
-			"filter": filter,
-		})
-		return filter
-	}
-
-	// Return an empty string without logging if no valid filters exist
-	return ""
-}
-
-// Refresh updates the topic cache, ensuring no duplicates are added
-func (m *TopicFunctionCache) Refresh(update map[string][]string) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	// Ensure no duplicates are added in the topic map
-	for topic, functions := range update {
-		existingFunctions, exists := m.topicMap[topic]
-		if exists {
-			for _, fn := range functions {
-				if !contains(existingFunctions, fn) {
-					existingFunctions = append(existingFunctions, fn)
-				}
-			}
-			m.topicMap[topic] = existingFunctions
-		} else {
-			m.topicMap[topic] = functions
+	// Check if we have function-specific filters
+	if functionFilters, exists := m.functionFilter[functionName]; exists {
+		// Check for topic-specific filter
+		if filter, exists := functionFilters[topic]; exists && filter != "" {
+			m.logJSON("info", "Found topic-specific filter for function", map[string]interface{}{
+				"topic":    topic,
+				"function": functionName,
+				"filter":   filter,
+			})
+			return filter
+		}
+		// Check for global filter for this function
+		if filter, exists := functionFilters["all"]; exists && filter != "" {
+			m.logJSON("info", "Using global filter for function", map[string]interface{}{
+				"function": functionName,
+				"filter":   filter,
+			})
+			return filter
 		}
 	}
 
-	m.logJSON("info", "Topic cache refreshed", map[string]interface{}{
-		"cache": m.topicMap,
-	})
+	return ""
 }
 
-// RefreshFilters updates the filter cache with new values
-func (m *TopicFunctionCache) RefreshFilters(update map[string]string) {
+func (m *TopicFunctionCache) Refresh(update map[string][]string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
+	m.topicMap = update
 
-	m.filterMap = update
-	m.logJSON("info", "Filter cache refreshed", map[string]interface{}{
-		"cache": m.filterMap,
-	})
+	// Debug logging for topic mappings
+	for topic, functions := range update {
+		m.logJSON("debug", "Cached topic mapping", map[string]interface{}{
+			"topic":     topic,
+			"functions": functions,
+		})
+	}
+}
+
+func (m *TopicFunctionCache) RefreshFilters(update map[string]map[string]string) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.functionFilter = update
+
+	// Debug logging for cache contents
+	for fn, filters := range update {
+		m.logJSON("debug", "Cached filters for function", map[string]interface{}{
+			"function": fn,
+			"filters":  filters,
+		})
+	}
 }
 
 // Helper function to check if a slice contains a specific element

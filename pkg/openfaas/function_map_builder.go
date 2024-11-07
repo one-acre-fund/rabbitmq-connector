@@ -11,21 +11,20 @@ import "strings"
 type TopicMapBuilder interface {
 	Append(topic string, function string)
 	AppendWithFilter(topic, function, filter string)
-	Build() (map[string][]string, map[string]string)
+	Build() (map[string][]string, map[string]map[string]string)
 }
 
 // FunctionMapBuilder convenient construct to build a map
-// of function <=> topic and function <=> filter
 type FunctionMapBuilder struct {
 	target    map[string][]string
-	filterMap map[string]string
+	filterMap map[string]map[string]string // map[functionName]map[topic]filter
 }
 
 // NewFunctionMapBuilder returns a new instance with an empty build target
 func NewFunctionMapBuilder() *FunctionMapBuilder {
 	return &FunctionMapBuilder{
 		target:    make(map[string][]string),
-		filterMap: make(map[string]string),
+		filterMap: make(map[string]map[string]string),
 	}
 }
 
@@ -48,10 +47,17 @@ func (b *FunctionMapBuilder) Append(topic string, function string) {
 // AppendWithFilter appends a topic with its associated function and filter
 func (b *FunctionMapBuilder) AppendWithFilter(topic, function, filter string) {
 	b.Append(topic, function)
-	b.filterMap[topic] = filter
+
+	if b.filterMap[function] == nil {
+		b.filterMap[function] = make(map[string]string)
+	}
+
+	if filter != "" {
+		b.filterMap[function][topic] = filter
+	}
 }
 
-// Build returns two maps: one with topics and functions, and one with topics and filters
-func (b *FunctionMapBuilder) Build() (map[string][]string, map[string]string) {
+// Build returns the topic map and function filter map
+func (b *FunctionMapBuilder) Build() (map[string][]string, map[string]map[string]string) {
 	return b.target, b.filterMap
 }
