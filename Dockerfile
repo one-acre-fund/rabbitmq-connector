@@ -1,4 +1,4 @@
-FROM golang:1.21.0-alpine as base_builder
+FROM golang:1.21.0-alpine AS base_builder
 
 RUN apk --no-cache add ca-certificates git
 
@@ -8,7 +8,7 @@ ENV GO111MODULE=on
 COPY go.mod go.sum  ./
 RUN go mod download
 
-FROM base_builder as builder
+FROM base_builder AS builder
 COPY . .
 
 RUN VERSION=$(git describe --all --exact-match $(git rev-parse HEAD) | grep tags | sed 's/tags\///') && \

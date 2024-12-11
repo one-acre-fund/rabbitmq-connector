@@ -221,38 +221,34 @@ func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool 
 	// Helper function to split AND/OR conditions and return whether they pass or fail
 	processAndConditions := func(filter string) bool {
 		andParts := strings.Split(filter, " && ")
-		atLeastOneConditionPassed := false
-		for _, andPart := range andParts {
-			condition := strings.TrimSpace(andPart)
 
-			// Evaluate each condition; ignore missing keys but track success
+		for _, andPart := range andParts {
+			// Decode the condition
+			condition := decodeAnnotations(strings.TrimSpace(andPart))
+
+			// Evaluate the condition
 			evalResult, keyExists := evaluateCondition(condition, payload)
 			if !keyExists {
-				// Log a warning if the key doesn't exist
 				c.logJSON("warning", "Key not found in payload, skipping condition", map[string]interface{}{
 					"condition": condition,
 				})
-				continue
+				return false
 			}
-			if keyExists && !evalResult {
-				// If a known condition fails, the whole AND condition fails
+			if !evalResult {
 				c.logJSON("info", "Condition did not match", map[string]interface{}{
 					"condition": condition,
 				})
 				return false
 			}
-			// If any condition passes, track that at least one succeeded
-			if evalResult {
-				atLeastOneConditionPassed = true
-			}
 		}
-		// Return true if at least one condition passed
-		return atLeastOneConditionPassed
+
+		return true
 	}
 
 	// Process OR conditions; any OR condition that passes means the filter passes
 	orParts := strings.Split(cachedFilter, " || ")
 	for _, orPart := range orParts {
+		orPart = strings.TrimSpace(orPart)
 		if processAndConditions(orPart) {
 			// If any OR part passes, the filter passes
 			return true
@@ -262,6 +258,26 @@ func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool 
 	// If no OR condition passed, the filter does not match
 	return false
 }
+
+func decodeAnnotations(input string) string {
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{`\u0026\u0026`, `&&`},   // Unicode for "&&"
+		{`\u007C\u007C`, `||`},   // Unicode for "||"
+		{`\\\"`, `"`},            // Escaped quotes
+		{`\\\\`, `\`},            // Escaped backslashes
+		{`\"`, `"`},              // Replace any single escaped quote
+	}
+
+	for _, r := range replacements {
+		input = strings.ReplaceAll(input, r.old, r.new)
+	}
+
+	return input
+}
+
 
 func getNestedValue(key string, data map[string]interface{}) (interface{}, bool) {
 	parts := strings.Split(key, ".")
@@ -292,6 +308,8 @@ func getNestedValue(key string, data map[string]interface{}) (interface{}, bool)
 
 // evaluateCondition returns (bool, bool) where the first bool is whether the condition passed and the second is whether the key existed in the payload.
 func evaluateCondition(condition string, payload map[string]interface{}) (bool, bool) {
+	// Decode condition to handle escaped sequences
+	condition = decodeAnnotations(condition)
 
 	// Handle Contains check first (e.g., id.Contains("Gonzalo"))
 	if strings.Contains(condition, "Contains(") {
@@ -652,39 +670,34 @@ func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, bu
 }
 
 // Helper function to append a filter if it doesn't already exist in the final string
-// Helper function to append a filter if it doesn't already exist in the final string
 func appendIfNotContains(finalFilter, newFilter string) string {
 	// Split finalFilter and newFilter into OR conditions
 	finalOrConditions := strings.Split(finalFilter, " || ")
 	newOrConditions := strings.Split(newFilter, " || ")
 
-	// Process each OR condition
-	for _, newOrCondition := range newOrConditions {
-		newAndConditions := strings.Split(newOrCondition, " && ")
-		for _, newAndCondition := range newAndConditions {
-			newAndCondition = strings.TrimSpace(newAndCondition)
-
-			// Check for duplicates in OR and AND conditions
-			if !conditionExists(finalOrConditions, newAndCondition) {
-				finalOrConditions = append(finalOrConditions, newAndCondition)
-			}
+	// Use a map to deduplicate conditions
+	conditionSet := make(map[string]struct{})
+	for _, condition := range finalOrConditions {
+		trimmed := strings.TrimSpace(condition)
+		if trimmed != "" {
+			conditionSet[trimmed] = struct{}{}
 		}
 	}
 
-	// Join OR conditions back into a single string, removing duplicates
-	finalFilter = strings.Join(finalOrConditions, " || ")
+	for _, condition := range newOrConditions {
+		trimmed := strings.TrimSpace(condition)
+		if trimmed != "" {
+			conditionSet[trimmed] = struct{}{}
+		}
+	}
 
-	// Remove leading/trailing '&&' or '||' and other possible trailing logical symbols
-	finalFilter = strings.TrimPrefix(finalFilter, " && ")
-	finalFilter = strings.TrimPrefix(finalFilter, " || ")
-	finalFilter = strings.TrimSuffix(finalFilter, " && ")
-	finalFilter = strings.TrimSuffix(finalFilter, " || ")
-	finalFilter = strings.TrimSuffix(finalFilter, " >= ")
-	finalFilter = strings.TrimSuffix(finalFilter, " <= ")
-	finalFilter = strings.TrimSuffix(finalFilter, " > ")
-	finalFilter = strings.TrimSuffix(finalFilter, " < ")
+	// Combine unique conditions back with " || "
+	var result []string
+	for condition := range conditionSet {
+		result = append(result, condition)
+	}
 
-	return finalFilter
+	return strings.Join(result, " || ")
 }
 
 // Helper function to check if a condition already exists in the list
