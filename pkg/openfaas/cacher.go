@@ -355,6 +355,27 @@ func evaluateCondition(condition string, payload map[string]interface{}) (bool, 
 		return fmt.Sprintf("%v", actualValue) == expectedValue, true
 	}
 
+	// Handle inequality checks (e.g., ref != "boy")
+	if strings.Contains(condition, "!=") {
+		parts := strings.Split(condition, "!=")
+		if len(parts) != 2 {
+			return false, false
+		}
+
+		key := strings.TrimSpace(parts[0])
+		expectedValue := strings.Trim(strings.TrimSpace(parts[1]), `"`)
+
+		// Get the actual value from the payload (handle nested keys)
+		actualValue, ok := getNestedValue(key, payload)
+		if !ok {
+			// Key not found in payload, ignore this condition
+			return false, false
+		}
+
+		// Compare actual value and expected value
+		return fmt.Sprintf("%v", actualValue) != expectedValue, true
+	}
+
 	// Handle greater than or equal to (e.g., quantity >= 10)
 	if strings.Contains(condition, ">=") {
 		parts := strings.Split(condition, ">=")
