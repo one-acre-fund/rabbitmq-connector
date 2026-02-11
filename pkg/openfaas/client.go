@@ -92,8 +92,16 @@ func (c *Client) InvokeSync(ctx context.Context, name string, invocation *intern
 		return nil, resp.StatusCode(), errors.Wrapf(err, "unable to invoke function %s", name)
 	}
 
-	// Return both the body and the status code
-	return resp.Body(), resp.StatusCode(), nil
+	switch resp.StatusCode() {
+	case fasthttp.StatusOK, fasthttp.StatusAccepted:
+		return resp.Body(), resp.StatusCode(), nil
+	case fasthttp.StatusNotFound:
+		return nil, resp.StatusCode(), fmt.Errorf("function %s is not deployed", name)
+	case fasthttp.StatusUnauthorized:
+		return nil, resp.StatusCode(), errors.New("OpenFaaS Credentials are invalid")
+	default:
+		return nil, resp.StatusCode(), fmt.Errorf("Received unexpected Status Code %d", resp.StatusCode())
+	}
 }
 
 // InvokeAsync calls a given function in a asynchronous way waiting for the response using the provided payload while considering the provided context
@@ -127,8 +135,16 @@ func (c *Client) InvokeAsync(ctx context.Context, name string, invocation *inter
 		return false, resp.StatusCode(), errors.Wrapf(err, "unable to invoke function %s", name)
 	}
 
-	// Return both the body and the status code
-	return false, resp.StatusCode(), nil
+	switch resp.StatusCode() {
+	case fasthttp.StatusOK, fasthttp.StatusAccepted:
+		return true, resp.StatusCode(), nil
+	case fasthttp.StatusNotFound:
+		return false, resp.StatusCode(), fmt.Errorf("function %s is not deployed", name)
+	case fasthttp.StatusUnauthorized:
+		return false, resp.StatusCode(), errors.New("OpenFaaS Credentials are invalid")
+	default:
+		return false, resp.StatusCode(), fmt.Errorf("Received unexpected Status Code %d", resp.StatusCode())
+	}
 }
 
 // HasNamespaceSupport Checks if the version of OpenFaaS does support Namespace

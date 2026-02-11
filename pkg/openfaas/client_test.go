@@ -87,33 +87,33 @@ func TestClient_InvokeSync(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Should invoke the specified function", func(t *testing.T) {
-		resp, err := openfaasClient.InvokeSync(context.Background(), "exists", &payload)
+		resp, _, err := openfaasClient.InvokeSync(context.Background(), "exists", &payload)
 
 		assert.Nil(t, err, "Should not fail")
 		assert.Equal(t, string(resp), expectedResponse, "Did not receive expected response")
 	})
 
 	t.Run("Should except nil as body", func(t *testing.T) {
-		resp, err := openfaasClient.InvokeSync(context.Background(), "exists", &nilPayload)
+		resp, _, err := openfaasClient.InvokeSync(context.Background(), "exists", &nilPayload)
 
 		assert.Nil(t, err, "Should not fail")
 		assert.Equal(t, string(resp), expectedResponse, "Did not receive expected response")
 	})
 
 	t.Run("Should throw error if function does not exist", func(t *testing.T) {
-		_, err := openfaasClient.InvokeSync(context.Background(), "nonexisting", &payload)
+		_, _, err := openfaasClient.InvokeSync(context.Background(), "nonexisting", &payload)
 
 		assert.Error(t, err, "Function nonexisting is not deployed", "Did receive unexpected error")
 	})
 
 	t.Run("Should throw error if unauthorized", func(t *testing.T) {
-		_, err := authenticatedOpenFaaSClient.InvokeSync(context.Background(), "exists", &nilPayload)
+		_, _, err := authenticatedOpenFaaSClient.InvokeSync(context.Background(), "exists", &nilPayload)
 
 		assert.Error(t, err, "OpenFaaS Credentials are invalid", "Did receive unexpected error")
 	})
 
 	t.Run("Should throw error on unexpected status code", func(t *testing.T) {
-		_, err := openfaasClient.InvokeSync(context.Background(), "internal", &payload)
+		_, _, err := openfaasClient.InvokeSync(context.Background(), "internal", &payload)
 
 		assert.Error(t, err, "Received unexpected Status Code 500", "Did receive unexpected error")
 	})
@@ -177,33 +177,33 @@ func TestClient_InvokeAsync(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Should invoke the specified function", func(t *testing.T) {
-		ok, err := openfaasClient.InvokeAsync(context.Background(), "exists", &payload)
+		ok, _, err := openfaasClient.InvokeAsync(context.Background(), "exists", &payload)
 
 		assert.Nil(t, err, "Should not fail")
 		assert.Equal(t, ok, true, "Did not receive expected response")
 	})
 
 	t.Run("Should except nil as body", func(t *testing.T) {
-		ok, err := openfaasClient.InvokeAsync(context.Background(), "exists", &nilPayload)
+		ok, _, err := openfaasClient.InvokeAsync(context.Background(), "exists", &nilPayload)
 
 		assert.Nil(t, err, "Should not fail")
 		assert.Equal(t, ok, true, "Did not receive expected response")
 	})
 
 	t.Run("Should throw error if function does not exist", func(t *testing.T) {
-		_, err := openfaasClient.InvokeAsync(context.Background(), "nonexisting", &payload)
+		_, _, err := openfaasClient.InvokeAsync(context.Background(), "nonexisting", &payload)
 
 		assert.Error(t, err, "Function nonexisting is not deployed", "Did receive unexpected error")
 	})
 
 	t.Run("Should throw error if unauthorized", func(t *testing.T) {
-		_, err := authenticatedOpenFaaSClient.InvokeAsync(context.Background(), "exists", &nilPayload)
+		_, _, err := authenticatedOpenFaaSClient.InvokeAsync(context.Background(), "exists", &nilPayload)
 
 		assert.Error(t, err, "OpenFaaS Credentials are invalid", "Did receive unexpected error")
 	})
 
 	t.Run("Should throw error on unexpected status code", func(t *testing.T) {
-		_, err := openfaasClient.InvokeAsync(context.Background(), "internal", &payload)
+		_, _, err := openfaasClient.InvokeAsync(context.Background(), "internal", &payload)
 
 		assert.Error(t, err, "Received unexpected Status Code 500", "Did receive unexpected error")
 	})
@@ -494,10 +494,10 @@ func TestClient_Edge(t *testing.T) {
 	t.Run("Should throw error if invalid base URL is provided", func(t *testing.T) {
 		var err error
 
-		_, err = openfaasClient.InvokeSync(context.Background(), "exists", &payload)
+		_, _, err = openfaasClient.InvokeSync(context.Background(), "exists", &payload)
 		assert.Error(t, err, "unsupported protocol ftp. http and https are supported", "Did receive unexpected error")
 
-		_, err = openfaasClient.InvokeAsync(context.Background(), "exists", &payload)
+		_, _, err = openfaasClient.InvokeAsync(context.Background(), "exists", &payload)
 		assert.Error(t, err, "unsupported protocol ftp. http and https are supported", "Did receive unexpected error")
 
 		_, err = openfaasClient.GetNamespaces(context.Background())
