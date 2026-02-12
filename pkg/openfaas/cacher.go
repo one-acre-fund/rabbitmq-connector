@@ -280,32 +280,31 @@ func decodeAnnotations(input string) string {
 }
 
 
+// mapLookup tries an exact key match, then falls back to case-insensitive.
+func mapLookup(m map[string]interface{}, key string) (interface{}, bool) {
+	if val, exists := m[key]; exists {
+		return val, true
+	}
+	lowerKey := strings.ToLower(key)
+	for k, v := range m {
+		if strings.ToLower(k) == lowerKey {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
 func getNestedValue(key string, data map[string]interface{}) (interface{}, bool) {
 	parts := strings.Split(key, ".")
 	var current interface{} = data
 
 	for _, part := range parts {
-		if m, ok := current.(map[string]interface{}); ok {
-			// Try exact match first
-			if val, exists := m[part]; exists {
-				current = val
-				continue
-			}
-
-			// Case-insensitive lookup
-			lowerPart := strings.ToLower(part)
-			found := false
-			for k, v := range m {
-				if strings.ToLower(k) == lowerPart {
-					current = v
-					found = true
-					break
-				}
-			}
-			if !found {
-				return nil, false
-			}
-		} else {
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		current, ok = mapLookup(m, part)
+		if !ok {
 			return nil, false
 		}
 	}
