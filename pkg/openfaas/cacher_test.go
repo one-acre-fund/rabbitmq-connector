@@ -80,7 +80,7 @@ func (m *MockOpenFaaSClient) GetNamespaces(ctx context.Context) ([]string, error
 }
 
 func (m *MockOpenFaaSClient) GetFunctions(ctx context.Context, namespace string) ([]types.FunctionStatus, error) {
-	args := m.Called(namespace)
+	args := m.Called(ctx, namespace)
 	return args.Get(0).([]types.FunctionStatus), args.Error(1)
 }
 
@@ -143,9 +143,9 @@ func TestCacher_Start_WithNs(t *testing.T) {
 	clientMock := new(MockOpenFaaSClient)
 	clientMock.On("HasNamespaceSupport", mock.Anything).Return(true, nil)
 	clientMock.On("GetNamespaces", mock.Anything).Return(namespaces, nil)
-	clientMock.On("GetFunctions", "faas").Return(fnFaaSNs, nil)
-	clientMock.On("GetFunctions", "test").Return(fnTestNs, nil)
-	clientMock.On("GetFunctions", "special").Return([]types.FunctionStatus{}, nil)
+	clientMock.On("GetFunctions", mock.Anything, "faas").Return(fnFaaSNs, nil)
+	clientMock.On("GetFunctions", mock.Anything, "test").Return(fnTestNs, nil)
+	clientMock.On("GetFunctions", mock.Anything, "special").Return([]types.FunctionStatus{}, nil)
 
 	conf := &config.Controller{TopicRefreshTime: 3 * time.Second}
 
@@ -163,7 +163,7 @@ func TestCacher_Start_Normal(t *testing.T) {
 
 	clientMock := new(MockOpenFaaSClient)
 	clientMock.On("HasNamespaceSupport", mock.Anything).Return(false, nil)
-	clientMock.On("GetFunctions", mock.Anything).Return(functions, nil)
+	clientMock.On("GetFunctions", mock.Anything, mock.Anything).Return(functions, nil)
 
 	conf := &config.Controller{TopicRefreshTime: 3 * time.Second}
 
@@ -194,7 +194,7 @@ func TestCacher_Start_WithFailures(t *testing.T) {
 	t.Run("Should swallow errors received during get functions", func(t *testing.T) {
 		clientMock := new(MockOpenFaaSClient)
 		clientMock.On("HasNamespaceSupport", mock.Anything).Return(false, nil)
-		clientMock.On("GetFunctions", mock.Anything).Return([]types.FunctionStatus{}, errors.New("Swallow me"))
+		clientMock.On("GetFunctions", mock.Anything, mock.Anything).Return([]types.FunctionStatus{}, errors.New("Swallow me"))
 		cacheMock := new(MockTopicMap)
 
 		cacher := NewController(conf, clientMock, cacheMock)
@@ -310,47 +310,28 @@ func TestGetNestedValue(t *testing.T) {
 		"Status": "active",
 	}
 
-	t.Run("Should return top-level value", func(t *testing.T) {
-		val, ok := getNestedValue("Status", payload)
-		assert.True(t, ok)
-		assert.Equal(t, "active", val)
-	})
+	tests := []struct {
+		name    string
+		key     string
+		wantOk  bool
+		wantVal interface{}
+	}{
+		{"top-level value", "Status", true, "active"},
+		{"nested value", "user.name", true, "John"},
+		{"deeply nested value", "user.address.city", true, "NYC"},
+		{"missing key", "user.email", false, nil},
+		{"missing nested key", "user.age.something", false, nil},
+		{"case-insensitive lookup", "status", true, "active"},
+		{"completely missing path", "nonexistent.path", false, nil},
+	}
 
-	t.Run("Should return nested value", func(t *testing.T) {
-		val, ok := getNestedValue("user.name", payload)
-		assert.True(t, ok)
-		assert.Equal(t, "John", val)
-	})
-
-	t.Run("Should return deeply nested value", func(t *testing.T) {
-		val, ok := getNestedValue("user.address.city", payload)
-		assert.True(t, ok)
-		assert.Equal(t, "NYC", val)
-	})
-
-	t.Run("Should return false for missing key", func(t *testing.T) {
-		val, ok := getNestedValue("user.email", payload)
-		assert.False(t, ok)
-		assert.Nil(t, val)
-	})
-
-	t.Run("Should return false for missing nested key", func(t *testing.T) {
-		val, ok := getNestedValue("user.age.something", payload)
-		assert.False(t, ok)
-		assert.Nil(t, val)
-	})
-
-	t.Run("Should do case-insensitive lookup", func(t *testing.T) {
-		val, ok := getNestedValue("status", payload)
-		assert.True(t, ok)
-		assert.Equal(t, "active", val)
-	})
-
-	t.Run("Should return false for completely missing path", func(t *testing.T) {
-		val, ok := getNestedValue("nonexistent.path", payload)
-		assert.False(t, ok)
-		assert.Nil(t, val)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, ok := getNestedValue(tt.key, payload)
+			assert.Equal(t, tt.wantOk, ok)
+			assert.Equal(t, tt.wantVal, val)
+		})
+	}
 }
 
 func TestEvaluateCondition(t *testing.T) {
