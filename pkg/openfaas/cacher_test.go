@@ -84,6 +84,20 @@ func (m *MockOpenFaaSClient) GetFunctions(ctx context.Context, namespace string)
 	return args.Get(0).([]types.FunctionStatus), args.Error(1)
 }
 
+func makeFunctionStatus(name, namespace string, annotations *map[string]string) types.FunctionStatus {
+	return types.FunctionStatus{
+		Name:              name,
+		Image:             "docker:image",
+		InvocationCount:   0,
+		Replicas:          1,
+		EnvProcess:        "",
+		AvailableReplicas: 1,
+		Labels:            nil,
+		Annotations:       annotations,
+		Namespace:         namespace,
+	}
+}
+
 func runStartSubtests(t *testing.T, conf *config.Controller, clientMock *MockOpenFaaSClient) {
 	t.Helper()
 
@@ -118,42 +132,12 @@ func TestCacher_Start_WithNs(t *testing.T) {
 	annotations := map[string]string{"topic": "billing,secret,transport"}
 
 	fnFaaSNs := []types.FunctionStatus{
-		{
-			Name:              "biller",
-			Image:             "docker:image",
-			InvocationCount:   0,
-			Replicas:          1,
-			EnvProcess:        "",
-			AvailableReplicas: 1,
-			Labels:            nil,
-			Annotations:       &annotations,
-			Namespace:         "faas",
-		},
-		{
-			Name:              "secrter",
-			Image:             "docker:image",
-			InvocationCount:   0,
-			Replicas:          1,
-			EnvProcess:        "",
-			AvailableReplicas: 1,
-			Labels:            nil,
-			Annotations:       &annotations,
-			Namespace:         "faas",
-		},
+		makeFunctionStatus("biller", "faas", &annotations),
+		makeFunctionStatus("secrter", "faas", &annotations),
 	}
 
 	fnTestNs := []types.FunctionStatus{
-		{
-			Name:              "transporter",
-			Image:             "docker:image",
-			InvocationCount:   0,
-			Replicas:          1,
-			EnvProcess:        "",
-			AvailableReplicas: 1,
-			Labels:            nil,
-			Annotations:       &annotations,
-			Namespace:         "test",
-		},
+		makeFunctionStatus("transporter", "test", &annotations),
 	}
 
 	clientMock := new(MockOpenFaaSClient)
@@ -173,28 +157,8 @@ func TestCacher_Start_Normal(t *testing.T) {
 	annotations := map[string]string{"topic": "billing,secret,transport"}
 
 	functions := []types.FunctionStatus{
-		{
-			Name:              "function-name",
-			Image:             "docker:image",
-			InvocationCount:   0,
-			Replicas:          1,
-			EnvProcess:        "",
-			AvailableReplicas: 1,
-			Labels:            nil,
-			Annotations:       &annotations,
-			Namespace:         "faas",
-		},
-		{
-			Name:              "wrencher",
-			Image:             "docker:image",
-			InvocationCount:   0,
-			Replicas:          1,
-			EnvProcess:        "",
-			AvailableReplicas: 1,
-			Labels:            nil,
-			Annotations:       &annotations,
-			Namespace:         "faas",
-		},
+		makeFunctionStatus("function-name", "faas", &annotations),
+		makeFunctionStatus("wrencher", "faas", &annotations),
 	}
 
 	clientMock := new(MockOpenFaaSClient)
@@ -257,13 +221,7 @@ func TestCacher_Invoke(t *testing.T) {
 
 		cacher := NewController(nil, clientMock, cacheMock)
 
-		message := []byte(`{"test": true}`)
-		invocation := &types2.OpenFaaSInvocation{
-			Topic:       TOPIC,
-			Message:     &message,
-			ContentType: "application/json",
-		}
-		err := cacher.Invoke(TOPIC, invocation)
+		err := cacher.Invoke(TOPIC, makeInvocation(TOPIC))
 
 		assert.NoError(t, err, "should not throw")
 		clientMock.AssertNumberOfCalls(t, "InvokeSync", 3)
@@ -277,13 +235,7 @@ func TestCacher_Invoke(t *testing.T) {
 
 		cacher := NewController(nil, clientMock, cacheMock)
 
-		message := []byte(`{"test": true}`)
-		invocation := &types2.OpenFaaSInvocation{
-			Topic:       TOPIC,
-			Message:     &message,
-			ContentType: "application/json",
-		}
-		err := cacher.Invoke(TOPIC, invocation)
+		err := cacher.Invoke(TOPIC, makeInvocation(TOPIC))
 
 		assert.Error(t, err, "failed")
 	})
@@ -294,20 +246,23 @@ func TestCacher_Invoke(t *testing.T) {
 
 		cacher := NewController(nil, clientMock, cacheMock)
 
-		message := []byte(`{"test": true}`)
-		invocation := &types2.OpenFaaSInvocation{
-			Topic:       "Security",
-			Message:     &message,
-			ContentType: "application/json",
-		}
-		err := cacher.Invoke("Security", invocation)
+		err := cacher.Invoke("Security", makeInvocation("Security"))
 
 		assert.NoError(t, err, "should not throw")
 		clientMock.AssertNotCalled(t, "InvokeSync")
 	})
 }
 
-// --- Filter unit tests ---
+// --- Helpers ---
+
+func makeInvocation(topic string) *types2.OpenFaaSInvocation {
+	message := []byte(`{"test": true}`)
+	return &types2.OpenFaaSInvocation{
+		Topic:       topic,
+		Message:     &message,
+		ContentType: "application/json",
+	}
+}
 
 func makeMessage(data map[string]interface{}) *[]byte {
 	b, _ := json.Marshal(data)
@@ -408,91 +363,36 @@ func TestEvaluateCondition(t *testing.T) {
 		"name":     "Gonzalo Martinez",
 	}
 
-	t.Run("Should evaluate equality true", func(t *testing.T) {
-		result, exists := evaluateCondition(`status == "active"`, payload)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
+	tests := []struct {
+		name       string
+		condition  string
+		payload    map[string]interface{}
+		wantResult bool
+		wantExists bool
+	}{
+		{"equality true", `status == "active"`, payload, true, true},
+		{"equality false", `status == "inactive"`, payload, false, true},
+		{"inequality true", `status != "inactive"`, payload, true, true},
+		{"inequality false", `status != "active"`, payload, false, true},
+		{"greater than true", `quantity > 10`, payload, true, true},
+		{"greater than false", `quantity > 20`, payload, false, true},
+		{"less than true", `quantity < 20`, payload, true, true},
+		{"greater than or equal", `quantity >= 15`, payload, true, true},
+		{"less than or equal", `quantity <= 15`, payload, true, true},
+		{"Contains true", `name.Contains("Gonzalo")`, payload, true, true},
+		{"Contains false", `name.Contains("Xavier")`, payload, false, true},
+		{"missing key", `missing == "value"`, payload, false, false},
+		{"value containing == characters", `ref == "a==b"`, map[string]interface{}{"ref": "a==b"}, true, true},
+		{"value containing > character", `desc == "amount>100"`, map[string]interface{}{"desc": "amount>100"}, true, true},
+	}
 
-	t.Run("Should evaluate equality false", func(t *testing.T) {
-		result, exists := evaluateCondition(`status == "inactive"`, payload)
-		assert.True(t, exists)
-		assert.False(t, result)
-	})
-
-	t.Run("Should evaluate inequality true", func(t *testing.T) {
-		result, exists := evaluateCondition(`status != "inactive"`, payload)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate inequality false", func(t *testing.T) {
-		result, exists := evaluateCondition(`status != "active"`, payload)
-		assert.True(t, exists)
-		assert.False(t, result)
-	})
-
-	t.Run("Should evaluate greater than true", func(t *testing.T) {
-		result, exists := evaluateCondition(`quantity > 10`, payload)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate greater than false", func(t *testing.T) {
-		result, exists := evaluateCondition(`quantity > 20`, payload)
-		assert.True(t, exists)
-		assert.False(t, result)
-	})
-
-	t.Run("Should evaluate less than true", func(t *testing.T) {
-		result, exists := evaluateCondition(`quantity < 20`, payload)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate greater than or equal", func(t *testing.T) {
-		result, exists := evaluateCondition(`quantity >= 15`, payload)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate less than or equal", func(t *testing.T) {
-		result, exists := evaluateCondition(`quantity <= 15`, payload)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate Contains true", func(t *testing.T) {
-		result, exists := evaluateCondition(`name.Contains("Gonzalo")`, payload)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate Contains false", func(t *testing.T) {
-		result, exists := evaluateCondition(`name.Contains("Xavier")`, payload)
-		assert.True(t, exists)
-		assert.False(t, result)
-	})
-
-	t.Run("Should return false for missing key", func(t *testing.T) {
-		result, exists := evaluateCondition(`missing == "value"`, payload)
-		assert.False(t, exists)
-		assert.False(t, result)
-	})
-
-	t.Run("Should handle value containing == characters", func(t *testing.T) {
-		p := map[string]interface{}{"ref": "a==b"}
-		result, exists := evaluateCondition(`ref == "a==b"`, p)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
-
-	t.Run("Should handle value containing > character", func(t *testing.T) {
-		p := map[string]interface{}{"desc": "amount>100"}
-		result, exists := evaluateCondition(`desc == "amount>100"`, p)
-		assert.True(t, exists)
-		assert.True(t, result)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, exists := evaluateCondition(tt.condition, tt.payload)
+			assert.Equal(t, tt.wantExists, exists)
+			assert.Equal(t, tt.wantResult, result)
+		})
+	}
 }
 
 func TestApplyAllFilters(t *testing.T) {
@@ -506,82 +406,6 @@ func TestApplyAllFilters(t *testing.T) {
 		"amount": float64(100),
 	}
 
-	t.Run("Should return true when no filter is set", func(t *testing.T) {
-		result := controller.applyAllFilters("", makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate single equality condition", func(t *testing.T) {
-		result := controller.applyAllFilters(`status == "active"`, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate AND conditions both true", func(t *testing.T) {
-		result := controller.applyAllFilters(`status == "active" && type == "billing"`, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate AND conditions one false", func(t *testing.T) {
-		result := controller.applyAllFilters(`status == "active" && type == "shipping"`, makeMessage(payload))
-		assert.False(t, result)
-	})
-
-	t.Run("Should evaluate OR conditions first true", func(t *testing.T) {
-		result := controller.applyAllFilters(`status == "active" || type == "shipping"`, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate OR conditions second true", func(t *testing.T) {
-		result := controller.applyAllFilters(`status == "inactive" || type == "billing"`, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should evaluate OR conditions both false", func(t *testing.T) {
-		result := controller.applyAllFilters(`status == "inactive" || type == "shipping"`, makeMessage(payload))
-		assert.False(t, result)
-	})
-
-	t.Run("Should evaluate mixed AND/OR -- OR of AND groups", func(t *testing.T) {
-		filter := `status == "inactive" && type == "billing" || status == "active" && amount >= 50`
-		result := controller.applyAllFilters(filter, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should handle encoded AND operators", func(t *testing.T) {
-		filter := `status == "active" \u0026\u0026 type == "billing"`
-		result := controller.applyAllFilters(filter, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should handle encoded OR operators", func(t *testing.T) {
-		filter := `status == "inactive" \u007C\u007C type == "billing"`
-		result := controller.applyAllFilters(filter, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should handle mixed encoded AND and OR operators", func(t *testing.T) {
-		filter := `status == "inactive" \u0026\u0026 type == "billing" \u007C\u007C status == "active" \u0026\u0026 type == "billing"`
-		result := controller.applyAllFilters(filter, makeMessage(payload))
-		assert.True(t, result)
-	})
-
-	t.Run("Should return false for invalid JSON message", func(t *testing.T) {
-		badMsg := []byte("not json")
-		result := controller.applyAllFilters(`status == "active"`, &badMsg)
-		assert.False(t, result)
-	})
-
-	t.Run("Should return false when filter references missing key in AND", func(t *testing.T) {
-		result := controller.applyAllFilters(`status == "active" && missing == "value"`, makeMessage(payload))
-		assert.False(t, result)
-	})
-
-	t.Run("Should return false when filter references missing nested key", func(t *testing.T) {
-		result := controller.applyAllFilters(`missing.nested.key == "value"`, makeMessage(payload))
-		assert.False(t, result)
-	})
-
-	// Real-world filter: Contains + equality combined with AND
 	realPayload := map[string]interface{}{
 		"id": "ke_12345",
 		"metadata": map[string]interface{}{
@@ -589,46 +413,57 @@ func TestApplyAllFilters(t *testing.T) {
 		},
 	}
 
-	t.Run("Should evaluate Contains AND equality on nested key", func(t *testing.T) {
-		filter := `id.Contains("ke_") && metadata.state == "done"`
-		result := controller.applyAllFilters(filter, makeMessage(realPayload))
-		assert.True(t, result)
-	})
+	pendingPayload := map[string]interface{}{
+		"id": "ke_12345",
+		"metadata": map[string]interface{}{
+			"state": "pending",
+		},
+	}
 
-	t.Run("Should evaluate Contains AND equality with escaped quotes", func(t *testing.T) {
-		filter := `id.Contains("ke_") && metadata.state == \"done\"`
-		result := controller.applyAllFilters(filter, makeMessage(realPayload))
-		assert.True(t, result)
-	})
+	orPayload := map[string]interface{}{
+		"id": "ug_99999",
+		"metadata": map[string]interface{}{
+			"state": "done",
+		},
+	}
 
-	t.Run("Should evaluate Contains AND equality with encoded AND operator", func(t *testing.T) {
-		filter := `id.Contains("ke_") \u0026\u0026 metadata.state == \"done\"`
-		result := controller.applyAllFilters(filter, makeMessage(realPayload))
-		assert.True(t, result)
-	})
+	tests := []struct {
+		name    string
+		filter  string
+		payload map[string]interface{}
+		want    bool
+	}{
+		{"no filter set", "", payload, true},
+		{"single equality condition", `status == "active"`, payload, true},
+		{"AND conditions both true", `status == "active" && type == "billing"`, payload, true},
+		{"AND conditions one false", `status == "active" && type == "shipping"`, payload, false},
+		{"OR conditions first true", `status == "active" || type == "shipping"`, payload, true},
+		{"OR conditions second true", `status == "inactive" || type == "billing"`, payload, true},
+		{"OR conditions both false", `status == "inactive" || type == "shipping"`, payload, false},
+		{"mixed AND/OR -- OR of AND groups", `status == "inactive" && type == "billing" || status == "active" && amount >= 50`, payload, true},
+		{"encoded AND operators", `status == "active" \u0026\u0026 type == "billing"`, payload, true},
+		{"encoded OR operators", `status == "inactive" \u007C\u007C type == "billing"`, payload, true},
+		{"mixed encoded AND and OR operators", `status == "inactive" \u0026\u0026 type == "billing" \u007C\u007C status == "active" \u0026\u0026 type == "billing"`, payload, true},
+		{"missing key in AND", `status == "active" && missing == "value"`, payload, false},
+		{"missing nested key", `missing.nested.key == "value"`, payload, false},
+		{"Contains AND equality on nested key", `id.Contains("ke_") && metadata.state == "done"`, realPayload, true},
+		{"Contains AND equality with escaped quotes", `id.Contains("ke_") && metadata.state == \"done\"`, realPayload, true},
+		{"Contains AND equality with encoded AND operator", `id.Contains("ke_") \u0026\u0026 metadata.state == \"done\"`, realPayload, true},
+		{"Contains AND equality when one condition fails", `id.Contains("ke_") && metadata.state == "done"`, pendingPayload, false},
+		{"Contains OR equality", `id.Contains("ke_") || metadata.state == "done"`, orPayload, true},
+	}
 
-	t.Run("Should fail Contains AND equality when one condition fails", func(t *testing.T) {
-		realPayload := map[string]interface{}{
-			"id": "ke_12345",
-			"metadata": map[string]interface{}{
-				"state": "pending",
-			},
-		}
-		filter := `id.Contains("ke_") && metadata.state == "done"`
-		result := controller.applyAllFilters(filter, makeMessage(realPayload))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := controller.applyAllFilters(tt.filter, makeMessage(tt.payload))
+			assert.Equal(t, tt.want, result)
+		})
+	}
+
+	t.Run("invalid JSON message", func(t *testing.T) {
+		badMsg := []byte("not json")
+		result := controller.applyAllFilters(`status == "active"`, &badMsg)
 		assert.False(t, result)
-	})
-
-	t.Run("Should evaluate Contains OR equality", func(t *testing.T) {
-		realPayload := map[string]interface{}{
-			"id": "ug_99999",
-			"metadata": map[string]interface{}{
-				"state": "done",
-			},
-		}
-		filter := `id.Contains("ke_") || metadata.state == "done"`
-		result := controller.applyAllFilters(filter, makeMessage(realPayload))
-		assert.True(t, result) // id doesn't match but state does
 	})
 }
 
