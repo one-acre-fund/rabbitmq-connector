@@ -20,6 +20,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+const errUnexpectedStatusCodeFmt = "Received unexpected Status Code %d"
+
+// ErrInvalidCredentials is returned when the OpenFaaS gateway responds with 401 Unauthorized.
+var ErrInvalidCredentials = errors.New("OpenFaaS Credentials are invalid")
+
 // Invoker defines interfaces that invoke deployed OpenFaaS Functions.
 type Invoker interface {
 	InvokeSync(ctx context.Context, name string, invocation *internal.OpenFaaSInvocation) ([]byte, int, error)
@@ -92,8 +97,16 @@ func (c *Client) InvokeSync(ctx context.Context, name string, invocation *intern
 		return nil, resp.StatusCode(), errors.Wrapf(err, "unable to invoke function %s", name)
 	}
 
-	// Return both the body and the status code
-	return resp.Body(), resp.StatusCode(), nil
+	switch resp.StatusCode() {
+	case fasthttp.StatusOK, fasthttp.StatusAccepted:
+		return resp.Body(), resp.StatusCode(), nil
+	case fasthttp.StatusNotFound:
+		return nil, resp.StatusCode(), fmt.Errorf("function %s is not deployed", name)
+	case fasthttp.StatusUnauthorized:
+		return nil, resp.StatusCode(), ErrInvalidCredentials
+	default:
+		return nil, resp.StatusCode(), fmt.Errorf(errUnexpectedStatusCodeFmt, resp.StatusCode())
+	}
 }
 
 // InvokeAsync calls a given function in a asynchronous way waiting for the response using the provided payload while considering the provided context
@@ -127,8 +140,16 @@ func (c *Client) InvokeAsync(ctx context.Context, name string, invocation *inter
 		return false, resp.StatusCode(), errors.Wrapf(err, "unable to invoke function %s", name)
 	}
 
-	// Return both the body and the status code
-	return false, resp.StatusCode(), nil
+	switch resp.StatusCode() {
+	case fasthttp.StatusOK, fasthttp.StatusAccepted:
+		return true, resp.StatusCode(), nil
+	case fasthttp.StatusNotFound:
+		return false, resp.StatusCode(), fmt.Errorf("function %s is not deployed", name)
+	case fasthttp.StatusUnauthorized:
+		return false, resp.StatusCode(), ErrInvalidCredentials
+	default:
+		return false, resp.StatusCode(), fmt.Errorf(errUnexpectedStatusCodeFmt, resp.StatusCode())
+	}
 }
 
 // HasNamespaceSupport Checks if the version of OpenFaaS does support Namespace
@@ -161,9 +182,9 @@ func (c *Client) HasNamespaceSupport(ctx context.Context) (bool, error) {
 		// Swarm edition of OF does not support namespaces and is simply returning empty array
 		return len(namespaces) > 0, nil
 	case fasthttp.StatusUnauthorized:
-		return false, errors.New("OpenFaaS Credentials are invalid")
+		return false, ErrInvalidCredentials
 	default:
-		log.Printf("Received unexpected Status Code %d while fetching namespaces\n", resp.StatusCode())
+		log.Printf(errUnexpectedStatusCodeFmt+" while fetching namespaces\n", resp.StatusCode())
 		return false, nil
 	}
 }
@@ -198,9 +219,9 @@ func (c *Client) GetNamespaces(ctx context.Context) ([]string, error) {
 		// Swarm edition of OF does not support namespaces and is simply returning empty array
 		return namespaces, nil
 	case fasthttp.StatusUnauthorized:
-		return nil, errors.New("OpenFaaS Credentials are invalid")
+		return nil, ErrInvalidCredentials
 	default:
-		log.Printf("Received unexpected Status Code %d while fetching namespaces\n", resp.StatusCode())
+		log.Printf(errUnexpectedStatusCodeFmt+" while fetching namespaces\n", resp.StatusCode())
 		return nil, nil
 	}
 }
@@ -239,8 +260,8 @@ func (c *Client) GetFunctions(ctx context.Context, namespace string) ([]types.Fu
 		// Swarm edition of OF does not support namespaces and is simply returning empty array
 		return functions, nil
 	case fasthttp.StatusUnauthorized:
-		return nil, errors.New("OpenFaaS Credentials are invalid")
+		return nil, ErrInvalidCredentials
 	default:
-		return nil, errors.New(fmt.Sprintf("Received unexpected Status Code %d", resp.StatusCode()))
+		return nil, fmt.Errorf(errUnexpectedStatusCodeFmt, resp.StatusCode())
 	}
 }
