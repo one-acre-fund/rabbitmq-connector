@@ -84,6 +84,30 @@ func (m *MockOpenFaaSClient) GetFunctions(ctx context.Context, namespace string)
 	return args.Get(0).([]types.FunctionStatus), args.Error(1)
 }
 
+func runStartSubtests(t *testing.T, conf *config.Controller, clientMock *MockOpenFaaSClient) {
+	t.Helper()
+
+	t.Run("Should perform a initial population of the map", func(t *testing.T) {
+		cacheMock := new(MockTopicMap)
+		cacher := NewController(conf, clientMock, cacheMock)
+		ctx, cancel := context.WithCancel(context.TODO())
+		defer cancel()
+		cacher.Start(ctx)
+		assert.Equal(t, cacheMock.CalledNTimes(), 1, "Expected an initial sync")
+	})
+
+	t.Run("Should sync every 3 seconds", func(t *testing.T) {
+		cacheMock := new(MockTopicMap)
+		cacher := NewController(conf, clientMock, cacheMock)
+		ctx, cancel := context.WithCancel(context.TODO())
+		defer cancel()
+		cacher.Start(ctx)
+		assert.Equal(t, cacheMock.CalledNTimes(), 1, "Expected an initial sync")
+		time.Sleep(4 * time.Second)
+		assert.Equal(t, cacheMock.CalledNTimes(), 2, "Expected a new sync")
+	})
+}
+
 func TestCacher_Start_WithNs(t *testing.T) {
 	namespaces := []string{
 		"faas",
@@ -142,32 +166,7 @@ func TestCacher_Start_WithNs(t *testing.T) {
 	conf := &config.Controller{TopicRefreshTime: 3 * time.Second}
 
 	t.Parallel()
-
-	t.Run("Should perform a initial population of the map", func(t *testing.T) {
-		cacheMock := new(MockTopicMap)
-
-		cacher := NewController(conf, clientMock, cacheMock)
-
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-
-		cacher.Start(ctx)
-		assert.Equal(t, cacheMock.CalledNTimes(), 1, "Expected an initial sync")
-	})
-
-	t.Run("Should sync every 3 seconds", func(t *testing.T) {
-		cacheMock := new(MockTopicMap)
-
-		cacher := NewController(conf, clientMock, cacheMock)
-
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-
-		cacher.Start(ctx)
-		assert.Equal(t, cacheMock.CalledNTimes(), 1, "Expected an initial sync")
-		time.Sleep(4 * time.Second)
-		assert.Equal(t, cacheMock.CalledNTimes(), 2, "Expected a new sync")
-	})
+	runStartSubtests(t, conf, clientMock)
 }
 
 func TestCacher_Start_Normal(t *testing.T) {
@@ -205,31 +204,7 @@ func TestCacher_Start_Normal(t *testing.T) {
 	conf := &config.Controller{TopicRefreshTime: 3 * time.Second}
 
 	t.Parallel()
-
-	t.Run("Should perform a initial population of the map", func(t *testing.T) {
-		cacheMock := new(MockTopicMap)
-
-		cacher := NewController(conf, clientMock, cacheMock)
-
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-
-		cacher.Start(ctx)
-		assert.Equal(t, cacheMock.CalledNTimes(), 1, "Expected an initial sync")
-	})
-
-	t.Run("Should sync every 3 seconds", func(t *testing.T) {
-		cacheMock := new(MockTopicMap)
-
-		cacher := NewController(conf, clientMock, cacheMock)
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-
-		cacher.Start(ctx)
-		assert.Equal(t, cacheMock.CalledNTimes(), 1, "Expected an initial sync")
-		time.Sleep(4 * time.Second)
-		assert.Equal(t, cacheMock.CalledNTimes(), 2, "Expected a new sync")
-	})
+	runStartSubtests(t, conf, clientMock)
 }
 
 func TestCacher_Start_WithFailures(t *testing.T) {
@@ -607,37 +582,26 @@ func TestApplyAllFilters(t *testing.T) {
 	})
 
 	// Real-world filter: Contains + equality combined with AND
+	realPayload := map[string]interface{}{
+		"id": "ke_12345",
+		"metadata": map[string]interface{}{
+			"state": "done",
+		},
+	}
+
 	t.Run("Should evaluate Contains AND equality on nested key", func(t *testing.T) {
-		realPayload := map[string]interface{}{
-			"id": "ke_12345",
-			"metadata": map[string]interface{}{
-				"state": "done",
-			},
-		}
 		filter := `id.Contains("ke_") && metadata.state == "done"`
 		result := controller.applyAllFilters(filter, makeMessage(realPayload))
 		assert.True(t, result)
 	})
 
 	t.Run("Should evaluate Contains AND equality with escaped quotes", func(t *testing.T) {
-		realPayload := map[string]interface{}{
-			"id": "ke_12345",
-			"metadata": map[string]interface{}{
-				"state": "done",
-			},
-		}
 		filter := `id.Contains("ke_") && metadata.state == \"done\"`
 		result := controller.applyAllFilters(filter, makeMessage(realPayload))
 		assert.True(t, result)
 	})
 
 	t.Run("Should evaluate Contains AND equality with encoded AND operator", func(t *testing.T) {
-		realPayload := map[string]interface{}{
-			"id": "ke_12345",
-			"metadata": map[string]interface{}{
-				"state": "done",
-			},
-		}
 		filter := `id.Contains("ke_") \u0026\u0026 metadata.state == \"done\"`
 		result := controller.applyAllFilters(filter, makeMessage(realPayload))
 		assert.True(t, result)
