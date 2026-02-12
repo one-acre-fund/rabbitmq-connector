@@ -39,7 +39,7 @@ func (s *MockTopicMap) GetCachedValues(name string) []string {
 	return args.Get(0).([]string)
 }
 
-func (s *MockTopicMap) GetCachedFilter(topic string, functionName string) string {
+func (s *MockTopicMap) GetCachedFilter(topic, functionName string) string {
 	args := s.Called(topic, functionName)
 	return args.String(0)
 }

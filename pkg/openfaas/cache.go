@@ -15,7 +15,7 @@ import (
 // TopicMap defines a interface for a topic map
 type TopicMap interface {
 	GetCachedValues(name string) []string
-	GetCachedFilter(topic string, functionName string) string
+	GetCachedFilter(topic, functionName string) string
 	Refresh(topicMap map[string][]string)
 	RefreshFilters(filterMap map[string]map[string]string)
 }
@@ -57,7 +57,7 @@ func (m *TopicFunctionCache) GetCachedValues(name string) []string {
 }
 
 // GetCachedFilter retrieves the filter associated with a topic, wildcard, or global filters
-func (m *TopicFunctionCache) GetCachedFilter(topic string, functionName string) string {
+func (m *TopicFunctionCache) GetCachedFilter(topic, functionName string) string {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 

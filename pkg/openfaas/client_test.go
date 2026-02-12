@@ -109,7 +109,7 @@ func TestClient_InvokeSync(t *testing.T) {
 	t.Run("Should throw error if unauthorized", func(t *testing.T) {
 		_, _, err := authenticatedOpenFaaSClient.InvokeSync(context.Background(), "exists", &nilPayload)
 
-		assert.Error(t, err, "OpenFaaS Credentials are invalid", "Did receive unexpected error")
+		assert.EqualError(t, err, ErrInvalidCredentials.Error(), "Did receive unexpected error")
 	})
 
 	t.Run("Should throw error on unexpected status code", func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestClient_InvokeAsync(t *testing.T) {
 	t.Run("Should throw error if unauthorized", func(t *testing.T) {
 		_, _, err := authenticatedOpenFaaSClient.InvokeAsync(context.Background(), "exists", &nilPayload)
 
-		assert.Error(t, err, "OpenFaaS Credentials are invalid", "Did receive unexpected error")
+		assert.EqualError(t, err, ErrInvalidCredentials.Error(), "Did receive unexpected error")
 	})
 
 	t.Run("Should throw error on unexpected status code", func(t *testing.T) {
@@ -285,7 +285,7 @@ func TestClient_HasNamespaceSupport(t *testing.T) {
 	t.Run("Should throw error if unauthorized", func(t *testing.T) {
 		_, err := authenticatedOpenFaaSClient.HasNamespaceSupport(context.Background())
 
-		assert.Error(t, err, "OpenFaaS Credentials are invalid", "Did receive unexpected error")
+		assert.EqualError(t, err, ErrInvalidCredentials.Error(), "Did receive unexpected error")
 	})
 }
 
@@ -405,7 +405,7 @@ func TestClient_GetFunctions(t *testing.T) {
 	t.Run("Should throw error if unauthorized", func(t *testing.T) {
 		_, err := authenticatedOpenFaaSClient.GetFunctions(context.Background(), "")
 
-		assert.Error(t, err, "OpenFaaS Credentials are invalid", "Did receive unexpected error")
+		assert.EqualError(t, err, ErrInvalidCredentials.Error(), "Did receive unexpected error")
 	})
 
 	t.Run("Should throw error on unexpected status code", func(t *testing.T) {
@@ -477,7 +477,7 @@ func TestClient_GetNamespaces(t *testing.T) {
 	t.Run("Should throw error if unauthorized", func(t *testing.T) {
 		_, err := authenticatedOpenFaaSClient.GetNamespaces(context.Background())
 
-		assert.Error(t, err, "OpenFaaS Credentials are invalid", "Did receive unexpected error")
+		assert.EqualError(t, err, ErrInvalidCredentials.Error(), "Did receive unexpected error")
 	})
 }
 
