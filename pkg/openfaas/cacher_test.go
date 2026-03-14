@@ -362,7 +362,7 @@ func TestEvaluateCondition(t *testing.T) {
 		{"less than or equal", `quantity <= 15`, payload, true, true},
 		{"Contains true", `name.Contains("Gonzalo")`, payload, true, true},
 		{"Contains false", `name.Contains("Xavier")`, payload, false, true},
-		{"missing key", `missing == "value"`, payload, false, false},
+		{"missing key", `missing == "value"`, payload, false, true},
 		{"value containing == characters", `ref == "a==b"`, map[string]interface{}{"ref": "a==b"}, true, true},
 		{"value containing > character", `desc == "amount>100"`, map[string]interface{}{"desc": "amount>100"}, true, true},
 	}
@@ -408,6 +408,15 @@ func TestApplyAllFilters(t *testing.T) {
 		},
 	}
 
+	// Payload without a "state" key in metadata (e.g., stock override events)
+	noStatePayload := map[string]interface{}{
+		"id": "ke_sapb1_itemstockoverride_duka-good-kisii:cost00407",
+		"metadata": map[string]interface{}{
+			"CountryCode":   "KE",
+			"WarehouseCode": "Duka",
+		},
+	}
+
 	tests := []struct {
 		name    string
 		filter  string
@@ -432,6 +441,14 @@ func TestApplyAllFilters(t *testing.T) {
 		{"Contains AND equality with encoded AND operator", `id.Contains("ke_") \u0026\u0026 metadata.state == \"done\"`, realPayload, true},
 		{"Contains AND equality when one condition fails", `id.Contains("ke_") && metadata.state == "done"`, pendingPayload, false},
 		{"Contains OR equality", `id.Contains("ke_") || metadata.state == "done"`, orPayload, true},
+		// Operator-aware missing key handling
+		{"missing key with != returns true", `missing != "value"`, payload, true},
+		{"missing key with == returns false", `missing == "value"`, payload, false},
+		{"missing nested key with != returns true", `metadata.state != "draft"`, noStatePayload, true},
+		{"missing key with Contains returns false", `missing.Contains("x")`, payload, false},
+		{"missing key with > returns false", `missing > 5`, payload, false},
+		{"Contains AND != on missing key passes", `id.Contains("ke_") && metadata.state != "draft"`, noStatePayload, true},
+		{"OR with missing key != true", `missing != "x" || status == "inactive"`, payload, true},
 	}
 
 	for _, tt := range tests {

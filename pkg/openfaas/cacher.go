@@ -228,9 +228,9 @@ func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool 
 			condition := strings.TrimSpace(andPart)
 
 			// Evaluate the condition
-			evalResult, keyExists := evaluateCondition(condition, payload)
-			if !keyExists {
-				c.logJSON("warning", "Key not found in payload, skipping condition", map[string]interface{}{
+			evalResult, valid := evaluateCondition(condition, payload)
+			if !valid {
+				c.logJSON("warning", "Could not parse condition, skipping", map[string]interface{}{
 					"condition": condition,
 				})
 				return false
@@ -312,11 +312,12 @@ func getNestedValue(key string, data map[string]interface{}) (interface{}, bool)
 }
 
 // compareString returns a condition evaluator for string comparison operators (==, !=).
-func compareString(fn func(a, e string) bool) func(string, string, map[string]interface{}) (bool, bool) {
+// defaultOnMissing controls the result when the key is not found in the payload.
+func compareString(fn func(a, e string) bool, defaultOnMissing bool) func(string, string, map[string]interface{}) (bool, bool) {
 	return func(key, expected string, payload map[string]interface{}) (bool, bool) {
 		actual, ok := getNestedValue(key, payload)
 		if !ok {
-			return false, false
+			return defaultOnMissing, true
 		}
 		return fn(fmt.Sprintf("%v", actual), expected), true
 	}
@@ -331,7 +332,7 @@ func compareNumeric(fn func(a, e float64) bool) func(string, string, map[string]
 		}
 		actual, ok := getNestedValue(key, payload)
 		if !ok {
-			return false, false
+			return false, true
 		}
 		actualFloat, err := strconv.ParseFloat(fmt.Sprintf("%v", actual), 64)
 		if err != nil {
@@ -352,7 +353,7 @@ func evaluateContains(condition string, payload map[string]interface{}) (bool, b
 
 	actualValue, ok := getNestedValue(key, payload)
 	if !ok {
-		return false, false
+		return false, true
 	}
 	return strings.Contains(
 		strings.ToLower(fmt.Sprintf("%v", actualValue)),
@@ -365,10 +366,10 @@ var operatorTable = []struct {
 	op      string
 	compare func(key, expected string, payload map[string]interface{}) (bool, bool)
 }{
-	{"!=", compareString(func(a, e string) bool { return a != e })},
+	{"!=", compareString(func(a, e string) bool { return a != e }, true)},
 	{">=", compareNumeric(func(a, e float64) bool { return a >= e })},
 	{"<=", compareNumeric(func(a, e float64) bool { return a <= e })},
-	{"==", compareString(func(a, e string) bool { return a == e })},
+	{"==", compareString(func(a, e string) bool { return a == e }, false)},
 	{">", compareNumeric(func(a, e float64) bool { return a > e })},
 	{"<", compareNumeric(func(a, e float64) bool { return a < e })},
 }
