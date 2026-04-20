@@ -228,7 +228,7 @@ func TestCacher_Invoke(t *testing.T) {
 		clientMock.AssertExpectations(t)
 	})
 
-	t.Run("Should continue invoking remaining functions when one function's sync+async both fail", func(t *testing.T) {
+	t.Run("Should continue invoking remaining functions and return error when sync+async fail", func(t *testing.T) {
 		clientMock := new(MockOpenFaaSClient)
 		clientMock.On("InvokeSync", mock.Anything, mock.Anything, mock.Anything).Return([]byte{}, 500, errors.New("failed"))
 		clientMock.On("InvokeAsync", mock.Anything, mock.Anything, mock.Anything).Return(false, 500, errors.New("async failed"))
@@ -237,10 +237,11 @@ func TestCacher_Invoke(t *testing.T) {
 
 		err := cacher.Invoke(TOPIC, makeInvocation(TOPIC))
 
-		assert.NoError(t, err, "one function's failure must not short-circuit the loop")
-		// 3 functions × 3 sync retries each
+		// Must return an error so the caller in rabbitmq/exchange.go NACKs/requeues.
+		assert.Error(t, err, "failed sync+async retries must be reported so the delivery is requeued")
+		// 3 functions × 3 sync retries each — no short-circuit despite failures.
 		clientMock.AssertNumberOfCalls(t, "InvokeSync", 9)
-		// 3 functions × 3 async retries each
+		// 3 functions × 3 async retries each.
 		clientMock.AssertNumberOfCalls(t, "InvokeAsync", 9)
 	})
 

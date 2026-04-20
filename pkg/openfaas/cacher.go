@@ -75,6 +75,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		return nil
 	}
 
+	var invocationErr error
 	for _, fn := range functions {
 		// Log the start of processing each function
 		c.logJSON("info", "Processing function", map[string]interface{}{
@@ -159,6 +160,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 
 			// Async fallback with retries
 			asyncSucceeded := false
+			var lastAsyncErr error
 			for i := 0; i < 3; i++ {
 				c.logJSON("info", "Attempting async invocation", map[string]interface{}{
 					"function": fn,
@@ -167,6 +169,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 
 				_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
 				if asyncErr != nil {
+					lastAsyncErr = asyncErr
 					c.logJSON("error", "Async invocation failed, retrying...", map[string]interface{}{
 						"function": fn,
 						"error":    asyncErr,
@@ -186,13 +189,18 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 
 			if !asyncSucceeded {
 				c.logJSON("error", "Async invocation failed after retries", map[string]interface{}{
-					"function": fn,
-					"error":    err,
+					"function":   fn,
+					"syncError":  err,
+					"asyncError": lastAsyncErr,
 				})
+				// Record first failure so caller can NACK/requeue; continue invoking
+				// remaining functions so one function's failure does not starve others.
+				if invocationErr == nil {
+					invocationErr = fmt.Errorf("function %q failed sync and async retries: sync error: %w; async error: %v", fn, err, lastAsyncErr)
+				}
 			}
 
-			// Move on to the next registered function instead of returning,
-			// so one function's failure does not starve others subscribed to the same topic.
+			// Move on to the next registered function.
 			continue
 		}
 
@@ -205,7 +213,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			"contentType": invocation.ContentType,
 		})
 	}
-	return nil
+	return invocationErr
 }
 func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool {
 	var payload map[string]interface{}
