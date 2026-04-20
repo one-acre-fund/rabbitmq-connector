@@ -158,6 +158,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			})
 
 			// Async fallback with retries
+			asyncSucceeded := false
 			for i := 0; i < 3; i++ {
 				c.logJSON("info", "Attempting async invocation", map[string]interface{}{
 					"function": fn,
@@ -179,14 +180,20 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 					"function": fn,
 					"status":   asyncStatusCode,
 				})
-				return nil
+				asyncSucceeded = true
+				break
 			}
 
-			c.logJSON("error", "Async invocation failed after retries", map[string]interface{}{
-				"function": fn,
-				"error":    err,
-			})
-			return err
+			if !asyncSucceeded {
+				c.logJSON("error", "Async invocation failed after retries", map[string]interface{}{
+					"function": fn,
+					"error":    err,
+				})
+			}
+
+			// Move on to the next registered function instead of returning,
+			// so one function's failure does not starve others subscribed to the same topic.
+			continue
 		}
 
 		c.logJSON("info", "Invocation succeeded", map[string]interface{}{
