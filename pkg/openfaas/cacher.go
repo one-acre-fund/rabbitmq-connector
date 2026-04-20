@@ -75,7 +75,6 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 		return nil
 	}
 
-	var invocationErr error
 	for _, fn := range functions {
 		// Log the start of processing each function
 		c.logJSON("info", "Processing function", map[string]interface{}{
@@ -193,14 +192,11 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 					"syncError":  err,
 					"asyncError": lastAsyncErr,
 				})
-				// Record first failure so caller can NACK/requeue; continue invoking
-				// remaining functions so one function's failure does not starve others.
-				if invocationErr == nil {
-					invocationErr = fmt.Errorf("function %q failed sync and async retries: sync error: %w; async error: %v", fn, err, lastAsyncErr)
-				}
 			}
 
-			// Move on to the next registered function.
+			// Deliberately do not propagate the failure: NACKing would requeue the
+			// message and cause duplicate invocations for the functions that already
+			// succeeded on this delivery. Continue to the next function instead.
 			continue
 		}
 
@@ -213,7 +209,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			"contentType": invocation.ContentType,
 		})
 	}
-	return invocationErr
+	return nil
 }
 func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool {
 	var payload map[string]interface{}
