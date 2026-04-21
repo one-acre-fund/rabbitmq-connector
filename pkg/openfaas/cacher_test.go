@@ -228,7 +228,7 @@ func TestCacher_Invoke(t *testing.T) {
 		clientMock.AssertExpectations(t)
 	})
 
-	t.Run("Should abort invocation of functions on receiving first error further returning it", func(t *testing.T) {
+	t.Run("Should attempt every function and not NACK when sync+async both fail", func(t *testing.T) {
 		clientMock := new(MockOpenFaaSClient)
 		clientMock.On("InvokeSync", mock.Anything, mock.Anything, mock.Anything).Return([]byte{}, 500, errors.New("failed"))
 		clientMock.On("InvokeAsync", mock.Anything, mock.Anything, mock.Anything).Return(false, 500, errors.New("async failed"))
@@ -237,7 +237,30 @@ func TestCacher_Invoke(t *testing.T) {
 
 		err := cacher.Invoke(TOPIC, makeInvocation(TOPIC))
 
-		assert.Error(t, err, "failed")
+		// Must return nil so the delivery is ACKed — NACKing would requeue and cause
+		// duplicate invocations for functions that already succeeded on this delivery.
+		assert.NoError(t, err, "do not NACK on per-function failure — duplicates would be worse than loss")
+		// 3 functions × 3 sync retries each — no short-circuit despite failures.
+		clientMock.AssertNumberOfCalls(t, "InvokeSync", 9)
+		// 3 functions × 3 async retries each.
+		clientMock.AssertNumberOfCalls(t, "InvokeAsync", 9)
+	})
+
+	t.Run("Should continue invoking remaining functions after async fallback succeeds for one", func(t *testing.T) {
+		clientMock := new(MockOpenFaaSClient)
+		clientMock.On("InvokeSync", mock.Anything, "billing", mock.Anything).Return([]byte{}, 500, errors.New("sync failed"))
+		clientMock.On("InvokeAsync", mock.Anything, "billing", mock.Anything).Return(true, 202, nil)
+		clientMock.On("InvokeSync", mock.Anything, "secret", mock.Anything).Return([]byte{}, 200, nil)
+		clientMock.On("InvokeSync", mock.Anything, "transport", mock.Anything).Return([]byte{}, 200, nil)
+
+		cacher := NewController(nil, clientMock, cacheMock)
+
+		err := cacher.Invoke(TOPIC, makeInvocation(TOPIC))
+
+		assert.NoError(t, err, "async success for one function must not short-circuit the loop")
+		// billing: 3 sync retries + 1 async; secret: 1 sync; transport: 1 sync
+		clientMock.AssertNumberOfCalls(t, "InvokeSync", 5)
+		clientMock.AssertNumberOfCalls(t, "InvokeAsync", 1)
 	})
 
 	t.Run("Should not invoke if there is no function for specified Topic", func(t *testing.T) {
