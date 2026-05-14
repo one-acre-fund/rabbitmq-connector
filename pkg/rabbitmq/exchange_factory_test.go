@@ -74,6 +74,7 @@ func TestExchangeFactory_Build(t *testing.T) {
 	exchange := &types.Exchange{
 		Name:        "Dax",
 		Topics:      []string{"Wirecard", "BMW"},
+		Queue:       "Dax_main",
 		Declare:     true,
 		Type:        "direct",
 		Durable:     true,
@@ -84,10 +85,10 @@ func TestExchangeFactory_Build(t *testing.T) {
 		invoker := new(invokerMock)
 		channel := new(channelMock)
 		channel.On("ExchangeDeclare", "Dax", "direct", true, true, false, false, amqp.Table{}).Return(nil)
-		channel.On("QueueDeclare", "Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
-		channel.On("QueueDeclare", "Dax_BMW", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
-		channel.On("QueueBind", "Dax_Wirecard", "Wirecard", "Dax", false, amqp.Table{}).Return(nil)
-		channel.On("QueueBind", "Dax_BMW", "BMW", "Dax", false, amqp.Table{}).Return(nil)
+		channel.On("QueueDeclare", "Dax_main", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
+		channel.On("QueueBind", "Dax_main", "Wirecard", "Dax", false, amqp.Table{}).Return(nil)
+		channel.On("QueueBind", "Dax_main", "BMW", "Dax", false, amqp.Table{}).Return(nil)
+		channel.On("Qos", 0, 0, false).Return(nil)
 
 		creator := new(creatorMock)
 		creator.On("Channel", nil).Return(channel, nil)
@@ -96,6 +97,8 @@ func TestExchangeFactory_Build(t *testing.T) {
 		target.WithChanCreator(creator)
 		target.WithInvoker(invoker)
 		target.WithExchange(exchange)
+		target.WithHealthMetrics(&OverallHealthMetrics{})
+		target.WithQoS(0, 0, false)
 
 		organizer, err := target.Build()
 
@@ -149,6 +152,7 @@ func TestExchangeFactory_Build(t *testing.T) {
 		target.WithChanCreator(creator)
 		target.WithInvoker(invoker)
 		target.WithExchange(exchange)
+		target.WithHealthMetrics(&OverallHealthMetrics{})
 
 		organizer, err := target.Build()
 
@@ -169,6 +173,7 @@ func TestExchangeFactory_Build(t *testing.T) {
 		target.WithChanCreator(creator)
 		target.WithInvoker(invoker)
 		target.WithExchange(exchange)
+		target.WithHealthMetrics(&OverallHealthMetrics{})
 
 		organizer, err := target.Build()
 
@@ -182,7 +187,7 @@ func TestExchangeFactory_Build(t *testing.T) {
 		invoker := new(invokerMock)
 		channel := new(channelMock)
 		channel.On("ExchangeDeclare", "Dax", "direct", true, true, false, false, amqp.Table{}).Return(nil)
-		channel.On("QueueDeclare", "Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, errors.New("failure"))
+		channel.On("QueueDeclare", "Dax_main", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, errors.New("failure"))
 
 		creator := new(creatorMock)
 		creator.On("Channel", nil).Return(channel, nil)
@@ -191,6 +196,7 @@ func TestExchangeFactory_Build(t *testing.T) {
 		target.WithChanCreator(creator)
 		target.WithInvoker(invoker)
 		target.WithExchange(exchange)
+		target.WithHealthMetrics(&OverallHealthMetrics{})
 
 		organizer, err := target.Build()
 
@@ -204,8 +210,8 @@ func TestExchangeFactory_Build(t *testing.T) {
 		invoker := new(invokerMock)
 		channel := new(channelMock)
 		channel.On("ExchangeDeclare", "Dax", "direct", true, true, false, false, amqp.Table{}).Return(nil)
-		channel.On("QueueDeclare", "Dax_Wirecard", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
-		channel.On("QueueBind", "Dax_Wirecard", "Wirecard", "Dax", false, amqp.Table{}).Return(errors.New("failure"))
+		channel.On("QueueDeclare", "Dax_main", true, true, false, false, amqp.Table{}).Return(amqp.Queue{}, nil)
+		channel.On("QueueBind", "Dax_main", "Wirecard", "Dax", false, amqp.Table{}).Return(errors.New("failure"))
 
 		creator := new(creatorMock)
 		creator.On("Channel", nil).Return(channel, nil)
@@ -214,6 +220,7 @@ func TestExchangeFactory_Build(t *testing.T) {
 		target.WithChanCreator(creator)
 		target.WithInvoker(invoker)
 		target.WithExchange(exchange)
+		target.WithHealthMetrics(&OverallHealthMetrics{})
 
 		organizer, err := target.Build()
 

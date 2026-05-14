@@ -48,12 +48,13 @@ func TestExchange_Start(t *testing.T) {
 	definition := types.Exchange{
 		Name:   "Nasdaq",
 		Topics: []string{"Billing", "Transport"},
+		Queue:  "Nasdaq_main",
 	}
 
 	t.Run("Should successfully start consuming for defined topics", func(t *testing.T) {
 		channel := new(channelMock)
-		channel.On("Consume", "Nasdaq_Billing", "", false, false, false, false, amqp.Table{}).Return(make(<-chan amqp.Delivery), nil)
-		channel.On("Consume", "Nasdaq_Transport", "", false, false, false, false, amqp.Table{}).Return(make(<-chan amqp.Delivery), nil)
+		channel.On("Qos", 0, 0, false).Return(nil)
+		channel.On("Consume", "Nasdaq_main", "", false, false, false, false, amqp.Table{}).Return(make(<-chan amqp.Delivery), nil)
 		channel.On("NotifyClose", mock.Anything).Return(make(chan *amqp.Error))
 
 		invoker := new(invokerMock)
@@ -69,7 +70,8 @@ func TestExchange_Start(t *testing.T) {
 
 	t.Run("Should return occurred error when starting consume failed", func(t *testing.T) {
 		channel := new(channelMock)
-		channel.On("Consume", "Nasdaq_Billing", "", false, false, false, false, amqp.Table{}).Return(make(<-chan amqp.Delivery), errors.New("expected"))
+		channel.On("Qos", 0, 0, false).Return(nil)
+		channel.On("Consume", "Nasdaq_main", "", false, false, false, false, amqp.Table{}).Return(make(<-chan amqp.Delivery), errors.New("expected"))
 		channel.On("NotifyClose", mock.Anything).Return(make(chan *amqp.Error))
 
 		invoker := new(invokerMock)
@@ -110,8 +112,9 @@ func TestExchange_StartConsuming(t *testing.T) {
 		acker.On("Ack", mock.Anything, false).Return(nil)
 
 		target := Exchange{
-			client:     invoker,
-			definition: &definition,
+			client:        invoker,
+			definition:    &definition,
+			healthMetrics: &OverallHealthMetrics{},
 		}
 
 		target.StartConsuming(createDeliveries(amqp.Delivery{
@@ -134,8 +137,9 @@ func TestExchange_StartConsuming(t *testing.T) {
 		acker.On("Ack", mock.Anything, false).Return(errors.New("failed"))
 
 		target := Exchange{
-			client:     invoker,
-			definition: &definition,
+			client:        invoker,
+			definition:    &definition,
+			healthMetrics: &OverallHealthMetrics{},
 		}
 
 		target.StartConsuming(createDeliveries(amqp.Delivery{
@@ -160,8 +164,9 @@ func TestExchange_StartConsuming(t *testing.T) {
 		acker.On("Nack", mock.Anything, false, true).Return(nil)
 
 		target := Exchange{
-			client:     invoker,
-			definition: &definition,
+			client:        invoker,
+			definition:    &definition,
+			healthMetrics: &OverallHealthMetrics{},
 		}
 
 		target.StartConsuming(createDeliveries(amqp.Delivery{
@@ -184,8 +189,9 @@ func TestExchange_StartConsuming(t *testing.T) {
 		acker.On("Nack", mock.Anything, false, true).Return(errors.New("failed"))
 
 		target := Exchange{
-			client:     invoker,
-			definition: &definition,
+			client:        invoker,
+			definition:    &definition,
+			healthMetrics: &OverallHealthMetrics{},
 		}
 
 		target.StartConsuming(createDeliveries(amqp.Delivery{
@@ -204,21 +210,21 @@ func TestExchange_StartConsuming(t *testing.T) {
 
 	t.Run("Should not invoke when received message is of no registered topic and further reject message and send it back to queue", func(t *testing.T) {
 		invoker := new(invokerMock)
-		invoker.On("Invoke", "Billing", mock.Anything).Return(nil)
 
 		acker := new(acknowledgerMock)
 		acker.On("Reject", mock.Anything, true).Return(nil)
 
 		target := Exchange{
-			client:     invoker,
-			definition: &definition,
+			client:        invoker,
+			definition:    &definition,
+			healthMetrics: &OverallHealthMetrics{},
 		}
 
 		target.StartConsuming(createDeliveries(amqp.Delivery{
 			Acknowledger:    acker,
 			ContentType:     "text/plain",
 			ContentEncoding: "utf-8",
-			RoutingKey:      "Billing",
+			RoutingKey:      "Unregistered",
 			Body:            []byte("Hello World"),
 		}))
 
@@ -228,21 +234,21 @@ func TestExchange_StartConsuming(t *testing.T) {
 
 	t.Run("Should attempt to reject deliveries for unregistered topics up to 3 times", func(t *testing.T) {
 		invoker := new(invokerMock)
-		invoker.On("Invoke", "Billing", mock.Anything).Return(nil)
 
 		acker := new(acknowledgerMock)
 		acker.On("Reject", mock.Anything, true).Return(errors.New("failed"))
 
 		target := Exchange{
-			client:     invoker,
-			definition: &definition,
+			client:        invoker,
+			definition:    &definition,
+			healthMetrics: &OverallHealthMetrics{},
 		}
 
 		target.StartConsuming(createDeliveries(amqp.Delivery{
 			Acknowledger:    acker,
 			ContentType:     "text/plain",
 			ContentEncoding: "utf-8",
-			RoutingKey:      "Billing",
+			RoutingKey:      "Unregistered",
 			Body:            []byte("Hello World"),
 		}))
 
