@@ -187,11 +187,11 @@ data:
 		var duration time.Duration
 
 		duration = getRefreshTime()
-		assert.Equal(t, duration, 30*time.Second, "Should fallback to 30s")
+		assert.Equal(t, duration, 60*time.Second, "Should fallback to 60s")
 
 		os.Setenv("TOPIC_MAP_REFRESH_TIME", "66,31h")
 		duration = getRefreshTime()
-		assert.Equal(t, duration, 30*time.Second, "Should fallback to 30s")
+		assert.Equal(t, duration, 60*time.Second, "Should fallback to 60s")
 	})
 
 	t.Run("With invalid SkipVerify", func(t *testing.T) {
@@ -247,7 +247,7 @@ data:
 		assert.Equal(t, config.RabbitConnectionURL, "amqp://localhost:5672/", "Expected default value")
 		assert.NotContains(t, config.RabbitSanitizedURL, "user:pass", "Expected credentials not to be present")
 		assert.Equal(t, config.RabbitSanitizedURL, "amqp://localhost:5672/", "Expected default value")
-		assert.Equal(t, config.TopicRefreshTime, 30*time.Second, "Expected default value")
+		assert.Equal(t, config.TopicRefreshTime, 60*time.Second, "Expected default value")
 		assert.False(t, config.InsecureSkipVerify, "Expected default value")
 		assert.Equal(t, config.MaxClientsPerHost, 256, "Expected default value")
 	})

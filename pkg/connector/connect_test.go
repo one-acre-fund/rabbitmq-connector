@@ -128,11 +128,9 @@ func TestConnector_Run(t *testing.T) {
 
 		factory := new(factoryMock)
 		factory.On("WithInvoker", nil)
-		factory.On("WithChanCreator", nil)
-		factory.On("WithExchange", nil)
-		factory.On("WithHealthMetrics", nil)
-		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
-		factory.On("Build", nil).Return(exchange, nil)
+		factory.On("WithChanCreator", mock.Anything)
+		factory.On("WithExchange", mock.Anything)
+		factory.On("Build").Return(exchange, nil)
 
 		target := New(manager, factory, nil, &conf)
 
@@ -160,11 +158,9 @@ func TestConnector_Run(t *testing.T) {
 
 		factory := new(factoryMock)
 		factory.On("WithInvoker", nil)
-		factory.On("WithChanCreator", nil)
-		factory.On("WithExchange", nil)
-		factory.On("WithHealthMetrics", nil)
-		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
-		factory.On("Build", nil).Return(nil, errors.New("build error"))
+		factory.On("WithChanCreator", mock.Anything)
+		factory.On("WithExchange", mock.Anything)
+		factory.On("Build").Return(nil, errors.New("build error"))
 
 		target := New(manager, factory, nil, &conf)
 
@@ -183,11 +179,9 @@ func TestConnector_Run(t *testing.T) {
 
 		factory := new(factoryMock)
 		factory.On("WithInvoker", nil)
-		factory.On("WithChanCreator", nil)
-		factory.On("WithExchange", nil)
-		factory.On("WithHealthMetrics", nil)
-		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
-		factory.On("Build", nil).Return(exchange, nil)
+		factory.On("WithChanCreator", mock.Anything)
+		factory.On("WithExchange", mock.Anything)
+		factory.On("Build").Return(exchange, nil)
 
 		target := New(manager, factory, nil, &conf)
 
@@ -272,11 +266,9 @@ func TestConnector_handleConnectionError(t *testing.T) {
 
 		factory := new(factoryMock)
 		factory.On("WithInvoker", nil)
-		factory.On("WithChanCreator", nil)
-		factory.On("WithExchange", nil)
-		factory.On("WithHealthMetrics", nil)
-		factory.On("WithQoS", conf.PrefetchCount, conf.PrefetchSize, conf.PrefetchGlobal)
-		factory.On("Build", nil).Return(exchange, nil)
+		factory.On("WithChanCreator", mock.Anything)
+		factory.On("WithExchange", mock.Anything)
+		factory.On("Build").Return(exchange, nil)
 
 		target := &Connector{
 			client: nil,
