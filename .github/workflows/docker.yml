@@ -18,6 +18,8 @@ on:
 
 jobs:
   Docker-Hub:
+    # Upstream Templum push targets — skipped on the OneAcreFund fork.
+    if: github.repository_owner == 'Templum'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3

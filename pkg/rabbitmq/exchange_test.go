@@ -58,7 +58,7 @@ func TestExchange_Start(t *testing.T) {
 
 		invoker := new(invokerMock)
 
-		target := NewExchange(channel, invoker, &definition)
+		target := NewExchange(channel, invoker, &definition, &OverallHealthMetrics{}, 0, 0, false)
 
 		err := target.Start()
 		assert.NoError(t, err, "should not throw")
@@ -74,7 +74,7 @@ func TestExchange_Start(t *testing.T) {
 
 		invoker := new(invokerMock)
 
-		target := NewExchange(channel, invoker, &definition)
+		target := NewExchange(channel, invoker, &definition, &OverallHealthMetrics{}, 0, 0, false)
 
 		err := target.Start()
 		assert.Error(t, err, "expected")
