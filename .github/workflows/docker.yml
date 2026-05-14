@@ -68,3 +68,72 @@ jobs:
           push: true
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
+
+  # Pushes to OAF ECR for use by EKS non-prod environments (dev/qa/uat).
+  # Production still pulls from Docker Hub / ACR until the prod EKS cutover is done.
+  # Requires repo-level vars: ECR_REGISTRY_ROLE (OIDC role ARN), AWS_REGION.
+  ECR:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.ECR_REGISTRY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR repository exists
+        shell: bash
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set +e
+          repo="oneacrefund/rabbitmq-connector"
+          if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "$repo" >/dev/null 2>&1; then
+            echo "exists: $repo"
+          else
+            aws ecr create-repository --region "$AWS_REGION" --repository-name "$repo" \
+              --image-scanning-configuration scanOnPush=true >/dev/null \
+              && echo "created: $repo" \
+              || echo "FAILED: $repo (create-repository denied or error)" >&2
+          fi
+          exit 0
+
+      - name: ECR meta
+        id: ecr_meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ steps.ecr.outputs.registry }}/oneacrefund/rabbitmq-connector
+          labels: |
+            org.opencontainers.image.title=rabbitmq-connector
+            org.opencontainers.image.description=An RabbitMQ Connector for OpenFaaS
+            org.opencontainers.image.vendor=OneAcreFund
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2.9.1
+
+      - name: Build and push to ECR
+        uses: docker/build-push-action@v4.1.1
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.ecr_meta.outputs.tags }}
+          labels: ${{ steps.ecr_meta.outputs.labels }}
