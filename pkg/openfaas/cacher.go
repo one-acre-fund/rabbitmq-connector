@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Knetic/govaluate"
 	types2 "github.com/Templum/rabbitmq-connector/pkg/types"
 
 	"github.com/Templum/rabbitmq-connector/pkg/config"
@@ -159,6 +158,8 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 			})
 
 			// Async fallback with retries
+			asyncSucceeded := false
+			var lastAsyncErr error
 			for i := 0; i < 3; i++ {
 				c.logJSON("info", "Attempting async invocation", map[string]interface{}{
 					"function": fn,
@@ -167,6 +168,7 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 
 				_, asyncStatusCode, asyncErr := c.client.InvokeAsync(context.Background(), fn, invocation)
 				if asyncErr != nil {
+					lastAsyncErr = asyncErr
 					c.logJSON("error", "Async invocation failed, retrying...", map[string]interface{}{
 						"function": fn,
 						"error":    asyncErr,
@@ -180,14 +182,22 @@ func (c *Controller) Invoke(topic string, invocation *types2.OpenFaaSInvocation)
 					"function": fn,
 					"status":   asyncStatusCode,
 				})
-				return nil
+				asyncSucceeded = true
+				break
 			}
 
-			c.logJSON("error", "Async invocation failed after retries", map[string]interface{}{
-				"function": fn,
-				"error":    err,
-			})
-			return err
+			if !asyncSucceeded {
+				c.logJSON("error", "Async invocation failed after retries", map[string]interface{}{
+					"function":   fn,
+					"syncError":  err,
+					"asyncError": lastAsyncErr,
+				})
+			}
+
+			// Deliberately do not propagate the failure: NACKing would requeue the
+			// message and cause duplicate invocations for the functions that already
+			// succeeded on this delivery. Continue to the next function instead.
+			continue
 		}
 
 		c.logJSON("info", "Invocation succeeded", map[string]interface{}{
@@ -218,41 +228,39 @@ func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool 
 		return true
 	}
 
+	// Decode encoded operators BEFORE splitting by && / ||
+	cachedFilter = decodeAnnotations(cachedFilter)
+
 	// Helper function to split AND/OR conditions and return whether they pass or fail
 	processAndConditions := func(filter string) bool {
 		andParts := strings.Split(filter, " && ")
-		atLeastOneConditionPassed := false
+
 		for _, andPart := range andParts {
 			condition := strings.TrimSpace(andPart)
 
-			// Evaluate each condition; ignore missing keys but track success
-			evalResult, keyExists := evaluateCondition(condition, payload)
-			if !keyExists {
-				// Log a warning if the key doesn't exist
-				c.logJSON("warning", "Key not found in payload, skipping condition", map[string]interface{}{
+			// Evaluate the condition
+			evalResult, valid := evaluateCondition(condition, payload)
+			if !valid {
+				c.logJSON("warning", "Could not parse condition, skipping", map[string]interface{}{
 					"condition": condition,
 				})
-				continue
+				return false
 			}
-			if keyExists && !evalResult {
-				// If a known condition fails, the whole AND condition fails
+			if !evalResult {
 				c.logJSON("info", "Condition did not match", map[string]interface{}{
 					"condition": condition,
 				})
 				return false
 			}
-			// If any condition passes, track that at least one succeeded
-			if evalResult {
-				atLeastOneConditionPassed = true
-			}
 		}
-		// Return true if at least one condition passed
-		return atLeastOneConditionPassed
+
+		return true
 	}
 
 	// Process OR conditions; any OR condition that passes means the filter passes
 	orParts := strings.Split(cachedFilter, " || ")
 	for _, orPart := range orParts {
+		orPart = strings.TrimSpace(orPart)
 		if processAndConditions(orPart) {
 			// If any OR part passes, the filter passes
 			return true
@@ -263,285 +271,141 @@ func (c *Controller) applyAllFilters(cachedFilter string, message *[]byte) bool 
 	return false
 }
 
+func decodeAnnotations(input string) string {
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{`\u0026\u0026`, `&&`},   // Unicode for "&&"
+		{`\u007C\u007C`, `||`},   // Unicode for "||"
+		{`\\\"`, `"`},            // Escaped quotes
+		{`\\\\`, `\`},            // Escaped backslashes
+		{`\"`, `"`},              // Replace any single escaped quote
+	}
+
+	for _, r := range replacements {
+		input = strings.ReplaceAll(input, r.old, r.new)
+	}
+
+	return input
+}
+
+
+// mapLookup tries an exact key match, then falls back to case-insensitive.
+func mapLookup(m map[string]interface{}, key string) (interface{}, bool) {
+	if val, exists := m[key]; exists {
+		return val, true
+	}
+	lowerKey := strings.ToLower(key)
+	for k, v := range m {
+		if strings.ToLower(k) == lowerKey {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
 func getNestedValue(key string, data map[string]interface{}) (interface{}, bool) {
 	parts := strings.Split(key, ".")
 	var current interface{} = data
 
 	for _, part := range parts {
-		if m, ok := current.(map[string]interface{}); ok {
-			// Try exact match first
-			if val, exists := m[part]; exists {
-				current = val
-				continue
-			}
-
-			// Case-insensitive lookup
-			lowerPart := strings.ToLower(part)
-			for k, v := range m {
-				if strings.ToLower(k) == lowerPart {
-					current = v
-					break
-				}
-			}
-		} else {
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		current, ok = mapLookup(m, part)
+		if !ok {
 			return nil, false
 		}
 	}
 	return current, true
 }
 
-// evaluateCondition returns (bool, bool) where the first bool is whether the condition passed and the second is whether the key existed in the payload.
+// compareString returns a condition evaluator for string comparison operators (==, !=).
+// defaultOnMissing controls the result when the key is not found in the payload.
+func compareString(fn func(a, e string) bool, defaultOnMissing bool) func(string, string, map[string]interface{}) (bool, bool) {
+	return func(key, expected string, payload map[string]interface{}) (bool, bool) {
+		actual, ok := getNestedValue(key, payload)
+		if !ok {
+			return defaultOnMissing, true
+		}
+		return fn(fmt.Sprintf("%v", actual), expected), true
+	}
+}
+
+// compareNumeric returns a condition evaluator for numeric comparison operators (>, <, >=, <=).
+func compareNumeric(fn func(a, e float64) bool) func(string, string, map[string]interface{}) (bool, bool) {
+	return func(key, expected string, payload map[string]interface{}) (bool, bool) {
+		expectedFloat, err := strconv.ParseFloat(expected, 64)
+		if err != nil {
+			return false, false
+		}
+		actual, ok := getNestedValue(key, payload)
+		if !ok {
+			return false, true
+		}
+		actualFloat, err := strconv.ParseFloat(fmt.Sprintf("%v", actual), 64)
+		if err != nil {
+			return false, false
+		}
+		return fn(actualFloat, expectedFloat), true
+	}
+}
+
+// evaluateContains handles the key.Contains("value") syntax.
+func evaluateContains(condition string, payload map[string]interface{}) (bool, bool) {
+	containsIndex := strings.Index(condition, ".Contains(")
+	if containsIndex == -1 {
+		return false, false
+	}
+	key := strings.TrimSpace(condition[:containsIndex])
+	containsValue := strings.Trim(strings.TrimSuffix(strings.TrimSpace(condition[containsIndex+10:]), ")"), `"`)
+
+	actualValue, ok := getNestedValue(key, payload)
+	if !ok {
+		return false, true
+	}
+	return strings.Contains(
+		strings.ToLower(fmt.Sprintf("%v", actualValue)),
+		strings.ToLower(containsValue),
+	), true
+}
+
+// Operator table: multi-char operators must come before single-char to avoid false matches.
+var operatorTable = []struct {
+	op      string
+	compare func(key, expected string, payload map[string]interface{}) (bool, bool)
+}{
+	{"!=", compareString(func(a, e string) bool { return a != e }, true)},
+	{">=", compareNumeric(func(a, e float64) bool { return a >= e })},
+	{"<=", compareNumeric(func(a, e float64) bool { return a <= e })},
+	{"==", compareString(func(a, e string) bool { return a == e }, false)},
+	{">", compareNumeric(func(a, e float64) bool { return a > e })},
+	{"<", compareNumeric(func(a, e float64) bool { return a < e })},
+}
+
+// evaluateCondition returns (result, keyExists) where result is whether the condition
+// passed and keyExists is whether the referenced key was found in the payload.
 func evaluateCondition(condition string, payload map[string]interface{}) (bool, bool) {
-
-	// Handle Contains check first (e.g., id.Contains("Gonzalo"))
-	if strings.Contains(condition, "Contains(") {
-		containsIndex := strings.Index(condition, "Contains(")
-		if containsIndex == -1 {
-			return false, false
-		}
-
-		key := strings.TrimSpace(condition[:containsIndex])
-		key = strings.TrimSuffix(key, ".")
-		containsValue := strings.Trim(strings.TrimSuffix(strings.TrimSpace(condition[containsIndex+9:]), ")"), `"`)
-
-		actualValue, ok := getNestedValue(key, payload)
-		if !ok {
-			return false, false
-		}
-
-		// Case-insensitive contains check
-		return strings.Contains(
-			strings.ToLower(fmt.Sprintf("%v", actualValue)),
-			strings.ToLower(containsValue),
-		), true
+	// Handle Contains check first (different syntax: key.Contains("value"))
+	if strings.Contains(condition, ".Contains(") {
+		return evaluateContains(condition, payload)
 	}
 
-	// Handle equality checks (e.g., ref == "boy")
-	if strings.Contains(condition, "==") {
-		parts := strings.Split(condition, "==")
-		if len(parts) != 2 {
-			return false, false
+	// Find the first matching operator and evaluate
+	for _, op := range operatorTable {
+		if idx := strings.Index(condition, op.op); idx != -1 {
+			key := strings.TrimSpace(condition[:idx])
+			value := strings.TrimSpace(condition[idx+len(op.op):])
+			value = strings.Trim(value, `"`)
+			return op.compare(key, value, payload)
 		}
-
-		key := strings.TrimSpace(parts[0])
-		expectedValue := strings.Trim(strings.TrimSpace(parts[1]), `"`)
-
-		// Get the actual value from the payload (handle nested keys)
-		actualValue, ok := getNestedValue(key, payload)
-		if !ok {
-			// Key not found in payload, ignore this condition
-			return false, false
-		}
-
-		// Compare actual value and expected value
-		return fmt.Sprintf("%v", actualValue) == expectedValue, true
 	}
 
-	// Handle greater than or equal to (e.g., quantity >= 10)
-	if strings.Contains(condition, ">=") {
-		parts := strings.Split(condition, ">=")
-		if len(parts) != 2 {
-			return false, false
-		}
-
-		key := strings.TrimSpace(parts[0])
-		expectedValue, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Get the actual value from the payload (handle nested keys)
-		actualValue, ok := getNestedValue(key, payload)
-		if !ok {
-			// Key not found in payload, ignore this condition
-			return false, false
-		}
-
-		// Convert actual value to a float for comparison
-		actualFloat, err := strconv.ParseFloat(fmt.Sprintf("%v", actualValue), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Perform comparison
-		return actualFloat >= expectedValue, true
-	}
-
-	// Handle less than or equal to (e.g., quantity <= 20)
-	if strings.Contains(condition, "<=") {
-		parts := strings.Split(condition, "<=")
-		if len(parts) != 2 {
-			return false, false
-		}
-
-		key := strings.TrimSpace(parts[0])
-		expectedValue, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Get the actual value from the payload (handle nested keys)
-		actualValue, ok := getNestedValue(key, payload)
-		if !ok {
-			// Key not found in payload, ignore this condition
-			return false, false
-		}
-
-		// Convert actual value to a float for comparison
-		actualFloat, err := strconv.ParseFloat(fmt.Sprintf("%v", actualValue), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Perform comparison
-		return actualFloat <= expectedValue, true
-	}
-
-	// Handle greater than (e.g., quantity > 10)
-	if strings.Contains(condition, ">") {
-		parts := strings.Split(condition, ">")
-		if len(parts) != 2 {
-			return false, false
-		}
-
-		key := strings.TrimSpace(parts[0])
-		expectedValue, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Get the actual value from the payload (handle nested keys)
-		actualValue, ok := getNestedValue(key, payload)
-		if !ok {
-			// Key not found in payload, ignore this condition
-			return false, false
-		}
-
-		// Convert actual value to a float for comparison
-		actualFloat, err := strconv.ParseFloat(fmt.Sprintf("%v", actualValue), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Perform comparison
-		return actualFloat > expectedValue, true
-	}
-
-	// Handle less than (e.g., quantity < 5)
-	if strings.Contains(condition, "<") {
-		parts := strings.Split(condition, "<")
-		if len(parts) != 2 {
-			return false, false
-		}
-
-		key := strings.TrimSpace(parts[0])
-		expectedValue, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Get the actual value from the payload (handle nested keys)
-		actualValue, ok := getNestedValue(key, payload)
-		if !ok {
-			// Key not found in payload, ignore this condition
-			return false, false
-		}
-
-		// Convert actual value to a float for comparison
-		actualFloat, err := strconv.ParseFloat(fmt.Sprintf("%v", actualValue), 64)
-		if err != nil {
-			return false, false
-		}
-
-		// Perform comparison
-		return actualFloat < expectedValue, true
-	}
-
-	// Return false for unhandled conditions
 	return false, false
 }
 
-func (c *Controller) applyFilter(filter string, message *[]byte) bool {
-	var payload map[string]interface{}
-
-	// Unmarshal the payload into a map
-	if err := json.Unmarshal(*message, &payload); err != nil {
-		c.logJSON("error", "Failed to unmarshal payload for filter evaluation", map[string]interface{}{
-			"error": err,
-		})
-		return false
-	}
-
-	// Define a custom 'Contains' function for string matching
-	functions := map[string]govaluate.ExpressionFunction{
-		"Contains": func(args ...interface{}) (interface{}, error) {
-			if len(args) != 2 {
-				return false, fmt.Errorf("Contains expects exactly two arguments")
-			}
-
-			str, ok1 := args[0].(string)
-			substr, ok2 := args[1].(string)
-			if !ok1 || !ok2 {
-				return false, fmt.Errorf("Contains arguments must be strings")
-			}
-
-			return strings.Contains(str, substr), nil
-		},
-	}
-
-	// Parse the filter expression with custom functions
-	expression, err := govaluate.NewEvaluableExpressionWithFunctions(filter, functions)
-	if err != nil {
-		c.logJSON("error", "Failed to parse filter expression", map[string]interface{}{
-			"error": err,
-		})
-		return false
-	}
-
-	// Evaluate the expression with the payload as parameters
-	result, err := expression.Evaluate(payload)
-	if err != nil {
-		c.logJSON("error", "Error evaluating filter expression", map[string]interface{}{
-			"error":  err,
-			"filter": filter,
-		})
-		return false
-	}
-
-	// Ensure the result is boolean
-	boolResult, ok := result.(bool)
-	if !ok {
-		c.logJSON("error", "Filter did not return a boolean result", map[string]interface{}{
-			"filter": filter,
-		})
-		return false
-	}
-
-	return boolResult
-}
-
-// evaluateFilter evaluates the filter expression against the given payload.
-func evaluateFilter(filter string, payload map[string]interface{}) (bool, error) {
-	// Parse the filter expression
-	expression, err := govaluate.NewEvaluableExpression(filter)
-	if err != nil {
-		return false, fmt.Errorf("failed to parse filter expression: %v", err)
-	}
-
-	// Evaluate the expression against the payload (using payload as parameters)
-	result, err := expression.Evaluate(payload)
-	if err != nil {
-		return false, fmt.Errorf("failed to evaluate filter: %v", err)
-	}
-
-	// Ensure the result is a boolean (true/false)
-	boolResult, ok := result.(bool)
-	if !ok {
-		return false, fmt.Errorf("filter did not return a boolean result")
-	}
-
-	return boolResult, nil
-}
 
 func (c *Controller) refresh(ctx context.Context, ticker *time.Ticker, hasNamespaceSupport bool) {
 loop:
@@ -569,7 +433,7 @@ func (c *Controller) refreshTick(ctx context.Context, hasNamespaceSupport bool) 
 			c.logJSON("error", "Error fetching namespaces", map[string]interface{}{
 				"error": err,
 			})
-			return // Skip updating the cache on error
+			namespaces = []string{}
 		}
 	} else {
 		namespaces = []string{""}
@@ -582,11 +446,6 @@ func (c *Controller) refreshTick(ctx context.Context, hasNamespaceSupport bool) 
 
 	// Retrieve both topic map and filter map from the builder
 	topicMap, filterMap := builder.Build()
-
-	if len(topicMap) == 0 {
-		c.logJSON("info", "New cache is empty, skipping cache refresh", nil)
-		return // Skip updating the cache if the new cache is empty
-	}
 
 	c.cache.Refresh(topicMap)         // Refresh the topic cache
 	c.cache.RefreshFilters(filterMap) // Refresh the filter cache
@@ -628,9 +487,12 @@ func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, bu
 				}
 
 				// Step 2: Append wildcard filter (e.g., "sanction.screen.all")
-				wildcardFilterKey := strings.Join(strings.Split(topic, ".")[:2], ".") + ".all"
-				if wildcardFilter, ok := filters[wildcardFilterKey]; ok {
-					finalFilter = appendIfNotContains(finalFilter, wildcardFilter)
+				topicParts := strings.Split(topic, ".")
+				if len(topicParts) >= 2 {
+					wildcardFilterKey := strings.Join(topicParts[:2], ".") + ".all"
+					if wildcardFilter, ok := filters[wildcardFilterKey]; ok {
+						finalFilter = appendIfNotContains(finalFilter, wildcardFilter)
+					}
 				}
 
 				// Step 3: Append global filter (e.g., "all")
@@ -652,73 +514,34 @@ func (c *Controller) crawlFunctions(ctx context.Context, namespaces []string, bu
 }
 
 // Helper function to append a filter if it doesn't already exist in the final string
-// Helper function to append a filter if it doesn't already exist in the final string
 func appendIfNotContains(finalFilter, newFilter string) string {
 	// Split finalFilter and newFilter into OR conditions
 	finalOrConditions := strings.Split(finalFilter, " || ")
 	newOrConditions := strings.Split(newFilter, " || ")
 
-	// Process each OR condition
-	for _, newOrCondition := range newOrConditions {
-		newAndConditions := strings.Split(newOrCondition, " && ")
-		for _, newAndCondition := range newAndConditions {
-			newAndCondition = strings.TrimSpace(newAndCondition)
-
-			// Check for duplicates in OR and AND conditions
-			if !conditionExists(finalOrConditions, newAndCondition) {
-				finalOrConditions = append(finalOrConditions, newAndCondition)
-			}
+	// Use a map to deduplicate conditions
+	conditionSet := make(map[string]struct{})
+	for _, condition := range finalOrConditions {
+		trimmed := strings.TrimSpace(condition)
+		if trimmed != "" {
+			conditionSet[trimmed] = struct{}{}
 		}
 	}
 
-	// Join OR conditions back into a single string, removing duplicates
-	finalFilter = strings.Join(finalOrConditions, " || ")
-
-	// Remove leading/trailing '&&' or '||' and other possible trailing logical symbols
-	finalFilter = strings.TrimPrefix(finalFilter, " && ")
-	finalFilter = strings.TrimPrefix(finalFilter, " || ")
-	finalFilter = strings.TrimSuffix(finalFilter, " && ")
-	finalFilter = strings.TrimSuffix(finalFilter, " || ")
-	finalFilter = strings.TrimSuffix(finalFilter, " >= ")
-	finalFilter = strings.TrimSuffix(finalFilter, " <= ")
-	finalFilter = strings.TrimSuffix(finalFilter, " > ")
-	finalFilter = strings.TrimSuffix(finalFilter, " < ")
-
-	return finalFilter
-}
-
-// Helper function to check if a condition already exists in the list
-func conditionExists(conditions []string, condition string) bool {
-	for _, cond := range conditions {
-		if strings.TrimSpace(cond) == condition {
-			return true
+	for _, condition := range newOrConditions {
+		trimmed := strings.TrimSpace(condition)
+		if trimmed != "" {
+			conditionSet[trimmed] = struct{}{}
 		}
 	}
-	return false
-}
 
-// Helper function to extract keys from a map (used for combining unique filters)
-func mapKeys(m map[string]bool) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-func (c *Controller) getWildcardFilterForTopic(topic string) string {
-	// Modify the topic to append ".all" by removing the last part of the topic
-	topicParts := strings.Split(topic, ".")
-	if len(topicParts) > 1 {
-		wildcardTopic := strings.Join(topicParts[:len(topicParts)-1], ".") + ".all"
-		c.logJSON("info", "Generated wildcard topic", map[string]interface{}{
-			"wildcardTopic": wildcardTopic,
-		})
-		return wildcardTopic // Directly return the modified wildcard topic
+	// Combine unique conditions back with " || "
+	var result []string
+	for condition := range conditionSet {
+		result = append(result, condition)
 	}
 
-	// If no wildcard filter can be created, return an empty string
-	return ""
+	return strings.Join(result, " || ")
 }
 
 // Extract filters from function annotations
@@ -750,8 +573,13 @@ func (c *Controller) extractTopicsFromAnnotations(fn types.FunctionStatus) []str
 
 	if fn.Annotations != nil {
 		annotations := *fn.Annotations
-		if topicNames, exist := annotations["topics"]; exist {
-			// Split and trim each topic name to ensure no leading/trailing whitespace
+		topicNames := ""
+		if val, exist := annotations["topics"]; exist {
+			topicNames = val
+		} else if val, exist := annotations["topic"]; exist {
+			topicNames = val
+		}
+		if topicNames != "" {
 			rawTopics := strings.Split(topicNames, ",")
 			for _, topic := range rawTopics {
 				topics = append(topics, strings.TrimSpace(topic))
