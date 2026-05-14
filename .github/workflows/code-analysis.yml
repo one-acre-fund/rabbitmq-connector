@@ -13,6 +13,8 @@ permissions:
 jobs:
   code:
     name: Analyse Code
+    # OAF org uses GitHub's default CodeQL setup; skip the manual flow there.
+    if: github.repository_owner == 'Templum'
     runs-on: ubuntu-latest
 
     strategy:
